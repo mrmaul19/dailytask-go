@@ -40,6 +40,15 @@ type HealthEnvelope struct {
 	Data    HealthData `json:"data"`
 }
 
+// ---------- auth ----------
+
+// AuthEnvelope adalah response register dan login.
+type AuthEnvelope struct {
+	Success bool         `json:"success" example:"true"`
+	Message string       `json:"message" example:"login berhasil"`
+	Data    AuthResponse `json:"data"`
+}
+
 // ---------- tasks ----------
 
 // TaskEnvelope adalah response satu task.

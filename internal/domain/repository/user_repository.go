@@ -20,9 +20,12 @@ func (f UserFilter) Offset() int {
 }
 
 type UserRepository interface {
-	Create(ctx context.Context, goals *entity.User) error
+	Create(ctx context.Context, user *entity.User) error
 	FindAll(ctx context.Context, filter UserFilter) ([]entity.User, int64, error)
 	FindByID(ctx context.Context, id uint) (*entity.User, error)
+	// FindByEmail dipakai usecase untuk menjaga keunikan email.
+	// Mengembalikan entity.ErrUserNotFound kalau email-nya belum terpakai.
+	FindByEmail(ctx context.Context, email string) (*entity.User, error)
 	Update(ctx context.Context, user *entity.User) error
 	Delete(ctx context.Context, id uint) error
 }

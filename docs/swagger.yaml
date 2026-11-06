@@ -1,5 +1,28 @@
 basePath: /
 definitions:
+  dto.AuthEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/dto.AuthResponse'
+      message:
+        example: login berhasil
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.AuthResponse:
+    properties:
+      expires_at:
+        description: |-
+          ExpiresAt dikirim supaya client tahu kapan harus login lagi tanpa
+          perlu membongkar isi token sendiri.
+        type: string
+      token:
+        type: string
+      user:
+        $ref: '#/definitions/dto.UserResponse'
+    type: object
   dto.CreateGoalsRequest:
     properties:
       category:
@@ -29,6 +52,9 @@ definitions:
       address:
         maxLength: 255
         type: string
+      email:
+        maxLength: 255
+        type: string
       job:
         maxLength: 100
         type: string
@@ -36,13 +62,27 @@ definitions:
         maxLength: 100
         minLength: 3
         type: string
+      password:
+        maxLength: 72
+        minLength: 8
+        type: string
+      role:
+        description: |-
+          Role opsional; kosong berarti "user". Dibatasi oneof supaya nilai asing
+          ditolak sejak di pintu masuk, bukan baru ketahuan di CHECK constraint.
+        enum:
+        - user
+        - admin
+        type: string
       status:
         maxLength: 100
         type: string
     required:
     - address
+    - email
     - job
     - name
+    - password
     - status
     type: object
   dto.ErrorEnvelope:
@@ -120,6 +160,18 @@ definitions:
         example: true
         type: boolean
     type: object
+  dto.LoginRequest:
+    properties:
+      email:
+        maxLength: 255
+        type: string
+      password:
+        maxLength: 72
+        type: string
+    required:
+    - email
+    - password
+    type: object
   dto.MessageEnvelope:
     properties:
       message:
@@ -128,6 +180,32 @@ definitions:
       success:
         example: true
         type: boolean
+    type: object
+  dto.RegisterRequest:
+    properties:
+      address:
+        maxLength: 255
+        type: string
+      email:
+        maxLength: 255
+        type: string
+      job:
+        maxLength: 100
+        type: string
+      name:
+        maxLength: 100
+        minLength: 3
+        type: string
+      password:
+        maxLength: 72
+        minLength: 8
+        type: string
+    required:
+    - address
+    - email
+    - job
+    - name
+    - password
     type: object
   dto.TaskEnvelope:
     properties:
@@ -198,6 +276,9 @@ definitions:
       address:
         maxLength: 255
         type: string
+      email:
+        maxLength: 255
+        type: string
       job:
         maxLength: 100
         type: string
@@ -205,14 +286,18 @@ definitions:
         maxLength: 100
         minLength: 3
         type: string
+      password:
+        maxLength: 72
+        minLength: 8
+        type: string
+      role:
+        enum:
+        - user
+        - admin
+        type: string
       status:
         maxLength: 100
         type: string
-    required:
-    - address
-    - job
-    - name
-    - status
     type: object
   dto.UserEnvelope:
     properties:
@@ -246,11 +331,15 @@ definitions:
         type: string
       created_at:
         type: string
+      email:
+        type: string
       id:
         type: integer
       job:
         type: string
       name:
+        type: string
+      role:
         type: string
       status:
         type: string
@@ -278,6 +367,89 @@ info:
   title: Daily Task API
   version: "1.0"
 paths:
+  /api/v1/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Mengembalikan token akses yang dipakai sebagai header `Authorization: Bearer {token}`.
+        Email yang tidak terdaftar dan password yang salah dibalas 401 dengan pesan yang sama persis —
+        disengaja, supaya endpoint ini tidak bisa dipakai memeriksa email mana saja yang punya akun.
+      parameters:
+      - description: Email dan password
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.AuthEnvelope'
+        "400":
+          description: validasi gagal
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: email atau password salah
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "429":
+          description: terlalu banyak percobaan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Login dan ambil token
+      tags:
+      - Auth
+  /api/v1/auth/register:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Endpoint publik untuk mendaftar sendiri. Langsung mengembalikan token,
+        jadi client tidak perlu memanggil login lagi setelah berhasil daftar.
+        Status akun ditentukan server (`aktif`) dan tidak bisa dikirim dari sini —
+        gunakan `POST /api/v1/users` kalau ingin menentukannya sendiri.
+      parameters:
+      - description: Data pendaftaran
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dto.AuthEnvelope'
+        "400":
+          description: validasi gagal
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "409":
+          description: email sudah terdaftar
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "429":
+          description: terlalu banyak percobaan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Daftar akun baru
+      tags:
+      - Auth
   /api/v1/goals:
     get:
       description: '`search` dicocokkan ke `title` dan `category` (case-insensitive,
@@ -732,17 +904,30 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dto.UserListEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "403":
+          description: butuh hak admin
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
       summary: Daftar user
       tags:
       - Users
     post:
       consumes:
       - application/json
-      description: Semua field wajib diisi.
+      description: |-
+        Semua field wajib diisi. `email` harus unik (dibandingkan tanpa membedakan huruf besar/kecil)
+        dan `password` minimal 8 karakter, maksimal 72.
+        Password disimpan sebagai hash bcrypt dan tidak pernah ikut dikembalikan di response.
       parameters:
       - description: Data user
         in: body
@@ -761,10 +946,24 @@ paths:
           description: validasi gagal
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "403":
+          description: butuh hak admin
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "409":
+          description: email sudah dipakai user lain
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
       summary: Buat user baru
       tags:
       - Users
@@ -790,6 +989,14 @@ paths:
           description: id bukan angka positif
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "403":
+          description: butuh hak admin
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
         "404":
           description: user tidak ditemukan
           schema:
@@ -798,6 +1005,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
       summary: Hapus user
       tags:
       - Users
@@ -821,6 +1030,14 @@ paths:
           description: id bukan angka positif
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "403":
+          description: butuh hak admin
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
         "404":
           description: user tidak ditemukan
           schema:
@@ -829,6 +1046,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
       summary: Detail user
       tags:
       - Users
@@ -836,8 +1055,9 @@ paths:
       consumes:
       - application/json
       description: |-
-        Catatan: `UpdateUserRequest` masih memakai `validate:"required"` pada field pointer,
-        jadi keempat field wajib dikirim meski usecase-nya sudah mendukung partial update.
+        Update sebagian field (partial update). Field yang tidak dikirim tetap memakai nilai lama,
+        field yang dikirim kosong ditolak dengan 400.
+        Kirim `password` hanya kalau memang ingin menggantinya — password lama tetap dipakai kalau field ini tidak ada.
       parameters:
       - description: ID user
         in: path
@@ -845,7 +1065,7 @@ paths:
         name: id
         required: true
         type: integer
-      - description: Data user
+      - description: Field yang mau diubah saja
         in: body
         name: request
         required: true
@@ -862,14 +1082,28 @@ paths:
           description: validasi gagal atau id tidak valid
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "403":
+          description: butuh hak admin
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
         "404":
           description: user tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "409":
+          description: email sudah dipakai user lain
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
       summary: Perbarui user
       tags:
       - Users
@@ -889,13 +1123,10 @@ paths:
 schemes:
 - http
 - https
+securityDefinitions:
+  BearerAuth:
+    description: 'Token dari /api/v1/auth/login. Isi dengan: Bearer {token}'
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
-tags:
-- description: Liveness check
-  name: Health
-- description: Daily task, satu-satunya resource yang punya lampiran file
-  name: Tasks
-- description: Target/goals, JSON murni
-  name: Goals
-- description: Data user
-  name: Users

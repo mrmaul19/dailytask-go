@@ -665,6 +665,8 @@ dalam ke paling luar.** Kalau baru membaca codebase ini pertama kali, baca denga
 | [repository/goals_repository.go](internal/domain/repository/goals_repository.go) | port akses data goals. |
 | [repository/user_repository.go](internal/domain/repository/user_repository.go) | port akses data user. |
 | [storage/file_storage.go](internal/domain/storage/file_storage.go) | **port** penyimpanan file: `Save` / `Open` / `Delete`. Sengaja memakai `io.Reader`, bukan `*multipart.FileHeader`, supaya usecase tidak terikat HTTP. |
+| [security/password_hasher.go](internal/domain/security/password_hasher.go) | **port** hashing password (`Hash` + `Verify`). Dibuat interface supaya algoritmanya bisa diganti (bcrypt → argon2id) tanpa menyentuh usecase, dan supaya unit test bisa memakai hasher cepat. |
+| [security/token_issuer.go](internal/domain/security/token_issuer.go) | **port** token akses: `Claims`, `Token`, `Issue`, `Parse`. Menukar JWT dengan session opaque cukup mengganti adapternya. |
 
 Semua file di folder ini hanya mengimpor stdlib. Itu yang dijaga oleh perintah `go list -deps` di atas.
 
@@ -675,6 +677,7 @@ Semua file di folder ini hanya mengimpor stdlib. Itu yang dijaga oleh perintah `
 | [task_usecase.go](internal/usecase/task_usecase.go) | alur task: generate `no_task` (`TASK-YYYYMMDD-XXXX`), urutan simpan file ↔ insert DB, partial update, hapus lampiran saat delete. Juga rumah dari helper paging (`normalizePaging`, `defaultPage`, `defaultLimit`, `maxLimit`) yang dipakai seluruh paket. |
 | [goals_usecase.go](internal/usecase/goals_usecase.go) | alur goals; contoh pola partial update pakai tabel field + pointer. |
 | [user_usecase.go](internal/usecase/user_usecase.go) | alur user; pola yang sama, tanpa file lampiran. |
+| [auth_usecase.go](internal/usecase/auth_usecase.go) | register & login. Register memakai ulang `UserUsecase.Create` (tidak menulis ulang hashing/cek email unik); login menyamakan respons & waktu eksekusi antara "email tidak ada" dan "password salah". |
 | [task_usecase_test.go](internal/usecase/task_usecase_test.go) | unit test dengan fake repository **dan** fake storage. |
 | [goals_usecase_test.go](internal/usecase/goals_usecase_test.go) | unit test + `fakeGoalsRepo` dan helper `kindOf` yang dipakai test lain. |
 | [user_usecase_test.go](internal/usecase/user_usecase_test.go) | unit test user. |
@@ -692,6 +695,8 @@ menyebut status code.
 | [persistence/goals_repository_sql.go](internal/infrastructure/persistence/goals_repository_sql.go) | implementasi `GoalsRepository` — cetakan paling bersih untuk resource baru tanpa file. |
 | [persistence/user_repository_sql.go](internal/infrastructure/persistence/user_repository_sql.go) | implementasi `UserRepository`. |
 | [storage/local_storage.go](internal/infrastructure/storage/local_storage.go) | implementasi `FileStorage` ke disk: acak nama file, validasi ukuran & ekstensi, cegah path traversal di `resolve`. |
+| [security/bcrypt_hasher.go](internal/infrastructure/security/bcrypt_hasher.go) | implementasi `PasswordHasher` memakai bcrypt, lengkap dengan penjagaan batas 72 byte. |
+| [security/jwt_issuer.go](internal/infrastructure/security/jwt_issuer.go) | implementasi `TokenIssuer` memakai JWT HS256. Algoritma dikunci saat Parse untuk mencegah serangan *alg confusion*, dan token tanpa `exp` ditolak. |
 
 ### 4. `internal/delivery/http/` — pintu masuk HTTP
 
@@ -700,12 +705,16 @@ menyebut status code.
 | [dto/task_dto.go](internal/delivery/http/dto/task_dto.go) | `CreateTaskRequest` / `UpdateTaskRequest` (pointer) / `TaskResponse` + konstruktornya. Mengekspos `file_url`, menyembunyikan `file_path`. |
 | [dto/goals_dto.go](internal/delivery/http/dto/goals_dto.go) | DTO goals. |
 | [dto/user_dto.go](internal/delivery/http/dto/user_dto.go) | DTO user. |
-| [dto/swagger_dto.go](internal/delivery/http/dto/swagger_dto.go) | **khusus dokumentasi** — envelope bertipe konkret (`TaskEnvelope`, `TaskListEnvelope`, `ErrorEnvelope`, dst.) yang dirujuk anotasi `@Success`/`@Failure`. Tidak dipakai kode runtime. |
+| [dto/auth_dto.go](internal/delivery/http/dto/auth_dto.go) | `RegisterRequest` (tanpa `status` — sengaja), `LoginRequest`, `AuthResponse` (token + `expires_at` + user). |
+| [dto/swagger_dto.go](internal/delivery/http/dto/swagger_dto.go) | **khusus dokumentasi** — envelope bertipe konkret (`TaskEnvelope`, `TaskListEnvelope`, `AuthEnvelope`, `ErrorEnvelope`, dst.) yang dirujuk anotasi `@Success`/`@Failure`. Tidak dipakai kode runtime. |
 | [handler/task_handler.go](internal/delivery/http/handler/task_handler.go) | handler fiber untuk task, termasuk `Download` (stream file). Rumah dari helper `parseID`. |
 | [handler/goals_handler.go](internal/delivery/http/handler/goals_handler.go) | handler fiber untuk goals. |
 | [handler/user_handler.go](internal/delivery/http/handler/user_handler.go) | handler fiber untuk user. |
+| [handler/auth_handler.go](internal/delivery/http/handler/auth_handler.go) | handler `register` & `login`. |
 | [middleware/error_handler.go](internal/delivery/http/middleware/error_handler.go) | **satu-satunya** penerjemah error → HTTP status; juga menangani error bawaan fiber (404 route tidak ada, body terlalu besar). |
-| [route/route.go](internal/delivery/http/route/route.go) | `/health` (sebagai fungsi `healthCheck` agar bisa dianotasi), `/swagger/*` (kalau `EnableDocs`), seluruh grup `/api/v1/...`, dan struct `Deps` berisi semua handler. |
+| [middleware/auth.go](internal/delivery/http/middleware/auth.go) | `Auth` memeriksa header `Authorization: Bearer <token>` lalu menaruh `userID`/`userEmail`/`userRole` di `c.Locals` (*siapa pemanggilnya*); `RequireAdmin` menolak non-admin dengan 403 (*dia boleh apa*). `RequireAdmin` wajib dipasang **setelah** `Auth`. |
+| [middleware/rate_limit.go](internal/delivery/http/middleware/rate_limit.go) | pembatas percobaan per IP untuk `/auth/*`, dengan bentuk body 429 yang konsisten dengan response lain. |
+| [route/route.go](internal/delivery/http/route/route.go) | `/health` (sebagai fungsi `healthCheck` agar bisa dianotasi), `/swagger/*` (kalau `EnableDocs`), grup `/api/v1/auth` (tanpa proteksi, tapi ber-rate-limit), grup `/api/v1/users` (`Auth` + `RequireAdmin`), dan struct `Deps`. |
 
 ### 5. `pkg/` — shared kernel, boleh dipakai layer mana pun
 
@@ -721,7 +730,7 @@ menyebut status code.
 |---|---|
 | [cmd/api/main.go](cmd/api/main.go) | composition root: anotasi umum Swagger (`@title`, `@version`, `@tag.*`) → load config → set `SwaggerInfo.Host` → koneksi DB → migrasi → storage → rakit repo/usecase/handler → middleware fiber (recover, logger, cors) → `route.Register` → graceful shutdown (SIGINT/SIGTERM, timeout 10s). |
 | [config/config.go](config/config.go) | baca `.env` + env var. **Satu-satunya** pemakai `os.Getenv`. Juga `DSN()` (untuk koneksi), `MaskedDSN()` (untuk log, password disembunyikan), dan `App.EnableDocs`. |
-| [migrations/](migrations/) | `0001_create_tasks.sql`, `0002_create_goals.sql`, `0003_create_users.sql`. |
+| [migrations/](migrations/) | `0001_create_tasks.sql`, `0002_create_goals.sql`, `0003_create_users.sql`, `0004_add_email_password_to_users.sql`, `0005_add_role_to_users.sql`. |
 | [migrations/embed.go](migrations/embed.go) | `//go:embed` semua `.sql` ke dalam binary, jadi deploy tidak perlu menyalin folder migrasi. |
 | [.env.example](.env.example) | daftar lengkap env var beserta nilai defaultnya, termasuk `ENABLE_DOCS`. |
 | [docker-compose.yml](docker-compose.yml) | container PostgreSQL untuk development. |
@@ -744,11 +753,40 @@ menyebut status code.
 
 ## Daftar endpoint
 
-| Method | Path | Keterangan |
-|---|---|---|
-| GET | `/health` | cek service |
-| GET | `/swagger/index.html` | Swagger UI (kalau `ENABLE_DOCS=true`) |
-| GET | `/swagger/doc.json` | spec OpenAPI mentah |
+| Method | Path | Keterangan | Token |
+|---|---|---|---|
+| GET | `/health` | cek service | – |
+| GET | `/swagger/index.html` | Swagger UI (kalau `ENABLE_DOCS=true`) | – |
+| GET | `/swagger/doc.json` | spec OpenAPI mentah | – |
+
+### Auth
+
+| Method | Path | Keterangan | Token |
+|---|---|---|---|
+| POST | `/api/v1/auth/register` | daftar akun sendiri, langsung dapat token | – |
+| POST | `/api/v1/auth/login` | tukar email+password dengan token | – |
+
+Register mengembalikan token juga, jadi client tidak perlu memanggil login lagi
+setelah berhasil daftar. **Register selalu membuat `role=user`** — field `role` dan `status`
+di body diabaikan, supaya tidak ada yang bisa mengangkat dirinya sendiri jadi admin.
+
+Grup ini dibatasi **10 percobaan per menit per IP** (atur lewat `AUTH_RATE_LIMIT_MAX` dan
+`AUTH_RATE_LIMIT_WINDOW`); kelebihannya dibalas `429`. Tanpa batas ini, password bisa ditebak
+terus-menerus — bcrypt memperlambat tiap percobaan, tapi memperlambat bukan menghentikan.
+
+**Login sengaja tidak membedakan "email tidak terdaftar" dari "password salah"** — keduanya
+dibalas `401` dengan pesan yang sama persis, dan sama-sama menjalankan satu verifikasi bcrypt
+sehingga waktu responsnya pun seragam. Kalau dibedakan, endpoint ini berubah fungsi jadi alat
+untuk memeriksa email mana saja yang punya akun.
+
+Memakai tokennya:
+
+```bash
+curl http://localhost:3000/api/v1/users \
+  -H "Authorization: Bearer <token>"
+```
+
+Di Swagger UI, klik tombol **Authorize** lalu isi `Bearer <token>`.
 
 ### Tasks
 
@@ -780,20 +818,57 @@ Goals tidak punya lampiran file, jadi request/response-nya JSON murni.
 
 ### Users
 
-| Method | Path | Keterangan |
-|---|---|---|
-| POST | `/api/v1/users` | buat user |
-| GET | `/api/v1/users?search=&page=&limit=` | list + pencarian + paginasi |
-| GET | `/api/v1/users/:id` | detail |
-| PUT | `/api/v1/users/:id` | update |
-| DELETE | `/api/v1/users/:id` | hapus user |
+**Seluruh grup ini butuh token DENGAN role `admin`.** Pendaftaran mandiri lewat
+`/api/v1/auth/register`.
 
-Field: `name` (wajib, 3–100), `address` (wajib, maks 255), `job` / `status` (wajib, maks 100).
+| Method | Path | Keterangan | Akses |
+|---|---|---|---|
+| POST | `/api/v1/users` | buat user (boleh menentukan `status` & `role`) | admin |
+| GET | `/api/v1/users?search=&page=&limit=` | list + pencarian + paginasi | admin |
+| GET | `/api/v1/users/:id` | detail | admin |
+| PUT | `/api/v1/users/:id` | update (termasuk promosi/penurunan role) | admin |
+| DELETE | `/api/v1/users/:id` | hapus user | admin |
+
+Beda `POST /users` dan `/auth/register`: register **tidak menerima** `status` maupun `role`
+(dipaksa `aktif` + `user` oleh server), sedangkan endpoint ini boleh menentukan keduanya —
+karena endpoint ini sendiri sudah dibatasi untuk admin.
+
+Bedanya 401 dan 403 di sini disengaja:
+
+| Status | Artinya |
+|---|---|
+| `401` | "saya tidak tahu kamu siapa" — token tidak dikirim, rusak, atau kedaluwarsa. Login dulu. |
+| `403` | "saya tahu kamu siapa, tapi kamu bukan admin". Login ulang **tidak** akan menolong. |
+
+### Membuat admin pertama
+
+Ayam & telur: `/auth/register` selalu membuat `role=user`, dan `/api/v1/users` sendiri sudah
+butuh admin. Jadi admin pertama dipromosikan manual, sekali seumur hidup database:
+
+```sql
+UPDATE users SET role = 'admin' WHERE email = 'email-anda@contoh.com';
+```
+
+Lalu **login ulang** untuk mendapat token baru. Token lama tetap membawa `role` lama sampai
+kedaluwarsa — lihat catatan implementasi di bawah.
+
+Field: `email` (wajib, format email, maks 255, **unik**), `password` (wajib, 8–72 karakter),
+`name` (wajib, 3–100), `address` (wajib, maks 255), `job` / `status` (wajib, maks 100),
+`role` (opsional, hanya `user` atau `admin`, default `user`).
 Pencarian dicocokkan ke `name` dan `job`.
 
-> Catatan: `UpdateUserRequest` saat ini masih memakai `validate:"required"` pada field pointer,
-> jadi `PUT /api/v1/users/:id` menuntut **keempat** field dikirim walau usecase-nya sudah
-> mendukung partial update. Ganti ke `omitempty` kalau mau konsisten dengan tasks & goals.
+Soal email & password:
+
+- **Password disimpan sebagai hash bcrypt**, tidak pernah dalam bentuk aslinya, dan **tidak pernah
+  ikut di response** — `dto.UserResponse` memang tidak punya field itu.
+- Batas `max=72` bukan angka sembarangan: bcrypt mengabaikan byte ke-73 dan seterusnya secara
+  diam-diam, jadi password yang lebih panjang hanya memberi rasa aman palsu.
+- **Email unik tanpa membedakan huruf besar/kecil.** `Budi@Mail.com` dan `budi@mail.com` dianggap
+  orang yang sama → `409`. Email disimpan dalam huruf kecil.
+- Pada `PUT`, kirim `password` **hanya kalau ingin menggantinya**. Kalau tidak dikirim, password
+  lama tetap dipakai.
+- Email bekas user yang sudah dihapus (soft delete) boleh dipakai lagi — unique index-nya parsial
+  (`WHERE deleted_at IS NULL`).
 
 ## Contoh request
 
@@ -837,13 +912,40 @@ curl -X DELETE http://localhost:3000/api/v1/goals/1
 ```
 
 ```bash
-# buat user
-curl -X POST http://localhost:3000/api/v1/users \
+# daftar akun (publik) — langsung dapat token
+curl -X POST http://localhost:3000/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"name":"Budi Santoso","address":"Jakarta","job":"backend developer","status":"aktif"}'
+  -d '{"email":"siti@mail.com","password":"rahasia123","name":"Siti Aminah","address":"Bandung","job":"designer"}'
+
+# login
+TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"siti@mail.com","password":"rahasia123"}' | jq -r .data.token)
+
+# pakai tokennya
+curl http://localhost:3000/api/v1/users -H "Authorization: Bearer $TOKEN"
+```
+
+```bash
+# buat user lewat endpoint pengelolaan (butuh token, boleh set status)
+curl -X POST http://localhost:3000/api/v1/users \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"budi@mail.com","password":"rahasia123","name":"Budi Santoso","address":"Jakarta","job":"backend developer","status":"aktif"}'
 
 # list + cari (dicocokkan ke name dan job)
-curl "http://localhost:3000/api/v1/users?search=budi&page=1&limit=10"
+curl "http://localhost:3000/api/v1/users?search=budi&page=1&limit=10" \
+  -H "Authorization: Bearer $TOKEN"
+
+# ganti job saja — password lama tetap, tidak perlu dikirim ulang
+curl -X PUT http://localhost:3000/api/v1/users/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"job":"tech lead"}'
+
+# ganti password
+curl -X PUT http://localhost:3000/api/v1/users/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"password":"passwordbaru123"}'
 ```
 
 ## Postman
@@ -913,6 +1015,39 @@ Mapping status: validasi → 400, tidak ditemukan → 404, `no_task` bentrok →
   jadi input pencarian tidak bisa dipakai untuk SQL injection.
 - **Password tidak pernah masuk log.** `Database.DSN()` untuk koneksi, `Database.MaskedDSN()`
   untuk log dan pesan error.
+- **Password user di-hash, bukan disimpan apa adanya.** Yang meng-hash adalah usecase lewat port
+  `security.PasswordHasher`, bukan handler dan bukan repository — jadi tidak ada satu pun jalur
+  masuk yang bisa menyimpan password polos. `entity.User.Password` selalu berisi hash, dan
+  `dto.UserResponse` sengaja tidak punya field itu sama sekali.
+- **Keunikan email dijaga dua lapis.** Usecase mengecek lewat `FindByEmail` supaya pesan errornya
+  ramah (`409 email "x" sudah digunakan`), tetapi penjaga sebenarnya adalah unique index di
+  database — tanpa itu, dua request bersamaan bisa lolos berdua.
+- **Login tidak membocorkan keberadaan akun.** Email tidak terdaftar dan password salah dibalas
+  `401` dengan pesan identik. Tidak cukup sampai di situ: saat email tidak ketemu, usecase tetap
+  menjalankan satu verifikasi ke hash dummy, karena kalau langsung `return`, request itu balas
+  jauh lebih cepat daripada email yang terdaftar (bcrypt sengaja lambat) — dan selisihnya bisa
+  diukur dari luar. Ada unit test yang mengunci kedua perilaku ini.
+- **Algoritma JWT dikunci saat verifikasi.** `Parse` hanya menerima `HS256`
+  (`jwt.WithValidMethods`) dan mewajibkan klaim `exp`. Tanpa itu, token ber-`alg: none` bisa
+  diterima mentah-mentah. Sudah diuji: token `alg=none` ditolak `401`.
+- **Token tidak bisa ditarik kembali.** Itu sifat JWT, bukan bug. Konsekuensinya: logout sejati
+  dan pencabutan akses butuh refresh token atau blacklist. Sementara ini yang membatasi dampak
+  hanyalah `JWT_TTL`.
+- **`role` ikut di dalam token, jadi token bisa basi.** Middleware membacanya dari claims supaya
+  tidak perlu query database tiap request. Harganya: admin yang baru diturunkan jadi user biasa
+  **masih punya hak admin sampai tokennya kedaluwarsa**, dan sebaliknya user yang baru
+  dipromosikan harus login ulang dulu. Sudah diuji langsung: promosi di database tidak mengubah
+  apa pun sampai login ulang. Ini alasan konkret kenapa `JWT_TTL` sebaiknya pendek. Kalau
+  pencabutan harus berlaku seketika, role wajib dibaca dari database di tiap request —
+  tukar satu query per request dengan kesegaran data.
+- **Role default adalah yang paling sedikit haknya.** `DEFAULT 'user'` di migrasi, dan
+  `normalizeRole("")` juga mengembalikan `user`. Kalau suatu saat ada jalur yang lupa mengisi
+  role, kegagalannya berupa "haknya kurang", bukan "siapa pun jadi admin".
+- **Nilai role dijaga dua lapis**, sama seperti keunikan email: `oneof=user admin` di DTO +
+  `normalizeRole` di usecase untuk pesan error yang ramah, dan `CHECK` constraint di database
+  sebagai penjaga terakhir kalau ada yang menulis langsung lewat psql.
+- **`JWT_SECRET` bawaan menolak jalan di production.** Dicek saat start di `main.go`, bukan saat
+  login pertama dicoba.
 - **Envelope Swagger memang duplikat, dan itu disengaja.** `response.Body` memakai `Data any`
   supaya satu bentuk body melayani semua endpoint; harganya, generator OpenAPI tidak bisa menebak
   isi `data`. Alternatifnya adalah membuat `response.Body` generic, tetapi swag v1 belum bisa
@@ -926,8 +1061,15 @@ Mapping status: validasi → 400, tidak ditemukan → 404, `no_task` bentrok →
 2. Tambah `deadline` dan endpoint "task hari ini".
 3. Ganti `localStorage` dengan adapter MinIO/S3 — kalau arsitekturnya benar, cukup step 4 dan
    `usecase` tidak berubah sama sekali.
-4. Tambah JWT auth sebagai middleware + relasi `user_id` pada task. Di sisi dokumentasi, tambahkan
-   `@securityDefinitions.apikey BearerAuth` di `main.go` dan `@Security BearerAuth` pada handler
-   yang dilindungi, supaya Swagger UI punya tombol **Authorize**.
+4. ~~Tambah JWT auth sebagai middleware~~ ✅ · ~~role/admin~~ ✅ · ~~rate limit~~ ✅.
+   Lanjutannya:
+   - **Relasi `user_id`** pada task & goals, supaya tiap orang hanya melihat datanya sendiri.
+     `middleware.UserIDFromContext(c)` sudah tersedia untuk itu.
+   - **Lindungi `/tasks` dan `/goals`** — sekarang masih publik; tinggal tambah
+     `deps.AuthMiddleware` pada kedua grup di `route.go`.
+   - **Refresh token** kalau butuh logout sejati dan pencabutan role yang berlaku seketika;
+     perlu tabel baru.
+   - **Rate limit berbasis Redis** kalau nanti jalan lebih dari satu instance — yang sekarang
+     menghitung per proses, jadi batas efektifnya berlipat sebanyak jumlah instance.
 5. Pakai migration tool (golang-migrate / goose) kalau nanti butuh `down` migration / rollback otomatis.
 6. Tambah integration test untuk repository memakai container Postgres (testcontainers-go).

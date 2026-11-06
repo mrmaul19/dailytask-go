@@ -15,6 +15,122 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/auth/login": {
+            "post": {
+                "description": "Mengembalikan token akses yang dipakai sebagai header ` + "`" + `Authorization: Bearer {token}` + "`" + `.\nEmail yang tidak terdaftar dan password yang salah dibalas 401 dengan pesan yang sama persis —\ndisengaja, supaya endpoint ini tidak bisa dipakai memeriksa email mana saja yang punya akun.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Login dan ambil token",
+                "parameters": [
+                    {
+                        "description": "Email dan password",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.AuthEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "validasi gagal",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "email atau password salah",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "terlalu banyak percobaan",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/register": {
+            "post": {
+                "description": "Endpoint publik untuk mendaftar sendiri. Langsung mengembalikan token,\njadi client tidak perlu memanggil login lagi setelah berhasil daftar.\nStatus akun ditentukan server (` + "`" + `aktif` + "`" + `) dan tidak bisa dikirim dari sini —\ngunakan ` + "`" + `POST /api/v1/users` + "`" + ` kalau ingin menentukannya sendiri.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Daftar akun baru",
+                "parameters": [
+                    {
+                        "description": "Data pendaftaran",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.RegisterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dto.AuthEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "validasi gagal",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "409": {
+                        "description": "email sudah terdaftar",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "429": {
+                        "description": "terlalu banyak percobaan",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/goals": {
             "get": {
                 "description": "` + "`" + `search` + "`" + ` dicocokkan ke ` + "`" + `title` + "`" + ` dan ` + "`" + `category` + "`" + ` (case-insensitive, pakai ILIKE).",
@@ -618,6 +734,11 @@ const docTemplate = `{
         },
         "/api/v1/users": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "` + "`" + `search` + "`" + ` dicocokkan ke ` + "`" + `name` + "`" + ` dan ` + "`" + `job` + "`" + ` (case-insensitive, pakai ILIKE).",
                 "produces": [
                     "application/json"
@@ -658,6 +779,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/dto.UserListEnvelope"
                         }
                     },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "butuh hak admin",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -667,7 +800,12 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Semua field wajib diisi.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Semua field wajib diisi. ` + "`" + `email` + "`" + ` harus unik (dibandingkan tanpa membedakan huruf besar/kecil)\ndan ` + "`" + `password` + "`" + ` minimal 8 karakter, maksimal 72.\nPassword disimpan sebagai hash bcrypt dan tidak pernah ikut dikembalikan di response.",
                 "consumes": [
                     "application/json"
                 ],
@@ -702,6 +840,24 @@ const docTemplate = `{
                             "$ref": "#/definitions/dto.ErrorEnvelope"
                         }
                     },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "butuh hak admin",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "409": {
+                        "description": "email sudah dipakai user lain",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -713,6 +869,11 @@ const docTemplate = `{
         },
         "/api/v1/users/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "User yang sudah dihapus (soft delete) tidak ikut terambil.",
                 "produces": [
                     "application/json"
@@ -744,6 +905,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/dto.ErrorEnvelope"
                         }
                     },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "butuh hak admin",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
                     "404": {
                         "description": "user tidak ditemukan",
                         "schema": {
@@ -759,7 +932,12 @@ const docTemplate = `{
                 }
             },
             "put": {
-                "description": "Catatan: ` + "`" + `UpdateUserRequest` + "`" + ` masih memakai ` + "`" + `validate:\"required\"` + "`" + ` pada field pointer,\njadi keempat field wajib dikirim meski usecase-nya sudah mendukung partial update.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update sebagian field (partial update). Field yang tidak dikirim tetap memakai nilai lama,\nfield yang dikirim kosong ditolak dengan 400.\nKirim ` + "`" + `password` + "`" + ` hanya kalau memang ingin menggantinya — password lama tetap dipakai kalau field ini tidak ada.",
                 "consumes": [
                     "application/json"
                 ],
@@ -780,7 +958,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Data user",
+                        "description": "Field yang mau diubah saja",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -802,8 +980,26 @@ const docTemplate = `{
                             "$ref": "#/definitions/dto.ErrorEnvelope"
                         }
                     },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "butuh hak admin",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
                     "404": {
                         "description": "user tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "409": {
+                        "description": "email sudah dipakai user lain",
                         "schema": {
                             "$ref": "#/definitions/dto.ErrorEnvelope"
                         }
@@ -817,6 +1013,11 @@ const docTemplate = `{
                 }
             },
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Soft delete: baris hanya diberi ` + "`" + `deleted_at` + "`" + `, tidak benar-benar dihapus dari tabel.",
                 "produces": [
                     "application/json"
@@ -844,6 +1045,18 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "id bukan angka positif",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "butuh hak admin",
                         "schema": {
                             "$ref": "#/definitions/dto.ErrorEnvelope"
                         }
@@ -885,6 +1098,37 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "dto.AuthEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dto.AuthResponse"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "login berhasil"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "dto.AuthResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "description": "ExpiresAt dikirim supaya client tahu kapan harus login lagi tanpa\nperlu membongkar isi token sendiri.",
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/dto.UserResponse"
+                }
+            }
+        },
         "dto.CreateGoalsRequest": {
             "type": "object",
             "required": [
@@ -921,12 +1165,18 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "address",
+                "email",
                 "job",
                 "name",
+                "password",
                 "status"
             ],
             "properties": {
                 "address": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "email": {
                     "type": "string",
                     "maxLength": 255
                 },
@@ -938,6 +1188,19 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 100,
                     "minLength": 3
+                },
+                "password": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                },
+                "role": {
+                    "description": "Role opsional; kosong berarti \"user\". Dibatasi oneof supaya nilai asing\nditolak sejak di pintu masuk, bukan baru ketahuan di CHECK constraint.",
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "admin"
+                    ]
                 },
                 "status": {
                     "type": "string",
@@ -1056,6 +1319,23 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.LoginRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "password"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "password": {
+                    "type": "string",
+                    "maxLength": 72
+                }
+            }
+        },
         "dto.MessageEnvelope": {
             "type": "object",
             "properties": {
@@ -1066,6 +1346,40 @@ const docTemplate = `{
                 "success": {
                     "type": "boolean",
                     "example": true
+                }
+            }
+        },
+        "dto.RegisterRequest": {
+            "type": "object",
+            "required": [
+                "address",
+                "email",
+                "job",
+                "name",
+                "password"
+            ],
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "email": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "job": {
+                    "type": "string",
+                    "maxLength": 100
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 3
+                },
+                "password": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
                 }
             }
         },
@@ -1164,14 +1478,12 @@ const docTemplate = `{
         },
         "dto.UpdateUserRequest": {
             "type": "object",
-            "required": [
-                "address",
-                "job",
-                "name",
-                "status"
-            ],
             "properties": {
                 "address": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "email": {
                     "type": "string",
                     "maxLength": 255
                 },
@@ -1183,6 +1495,18 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 100,
                     "minLength": 3
+                },
+                "password": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                },
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "admin"
+                    ]
                 },
                 "status": {
                     "type": "string",
@@ -1237,6 +1561,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "email": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "integer"
                 },
@@ -1244,6 +1571,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "role": {
                     "type": "string"
                 },
                 "status": {
@@ -1272,24 +1602,14 @@ const docTemplate = `{
             }
         }
     },
-    "tags": [
-        {
-            "description": "Liveness check",
-            "name": "Health"
-        },
-        {
-            "description": "Daily task, satu-satunya resource yang punya lampiran file",
-            "name": "Tasks"
-        },
-        {
-            "description": "Target/goals, JSON murni",
-            "name": "Goals"
-        },
-        {
-            "description": "Data user",
-            "name": "Users"
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Token dari /api/v1/auth/login. Isi dengan: Bearer {token}",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
         }
-    ]
+    }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it

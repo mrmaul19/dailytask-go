@@ -32,6 +32,10 @@ func ErrorHandler(debug bool) fiber.ErrorHandler {
 			status = http.StatusNotFound
 		case apperror.KindConflict:
 			status = http.StatusConflict
+		case apperror.KindUnauthorized:
+			status = http.StatusUnauthorized
+		case apperror.KindForbidden:
+			status = http.StatusForbidden
 		}
 
 		if status >= http.StatusInternalServerError {

@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -47,6 +48,16 @@ func (r *fakeUserRepo) FindByID(_ context.Context, id uint) (*entity.User, error
 	return &u, nil
 }
 
+func (r *fakeUserRepo) FindByEmail(_ context.Context, email string) (*entity.User, error) {
+	for _, u := range r.users {
+		if strings.EqualFold(u.Email, email) {
+			found := u
+			return &found, nil
+		}
+	}
+	return nil, entity.ErrUserNotFound
+}
+
 func (r *fakeUserRepo) Update(_ context.Context, user *entity.User) error {
 	if _, ok := r.users[user.ID]; !ok {
 		return entity.ErrUserNotFound
@@ -63,20 +74,47 @@ func (r *fakeUserRepo) Delete(_ context.Context, id uint) error {
 	return nil
 }
 
+// ---------- fake hasher ----------
+
+// fakeHasher sengaja tidak memakai bcrypt: bcrypt dibuat lambat dengan sengaja,
+// dan kalau dipakai di sini setiap test ikut lambat. Yang diuji di lapisan ini
+// adalah "apakah usecase benar-benar meng-hash", bukan kekuatan algoritmanya.
+var errPasswordTidakCocok = errors.New("password tidak cocok")
+
+type fakeHasher struct {
+	calls       int
+	verifyCalls int
+}
+
+func (h *fakeHasher) Hash(plain string) (string, error) {
+	h.calls++
+	return "hashed:" + plain, nil
+}
+
+func (h *fakeHasher) Verify(hash, plain string) error {
+	h.verifyCalls++
+	if hash != "hashed:"+plain {
+		return errPasswordTidakCocok
+	}
+	return nil
+}
+
 // ---------- helper ----------
 
 func setupUser() (usecase.UserUsecase, *fakeUserRepo) {
 	repo := newFakeUserRepo()
-	return usecase.NewUserUsecase(repo), repo
+	return usecase.NewUserUsecase(repo, &fakeHasher{}), repo
 }
 
 func seedUser(t *testing.T, uc usecase.UserUsecase) *entity.User {
 	t.Helper()
 	user, err := uc.Create(context.Background(), usecase.CreateUserInput{
-		Name:    "Budi Santoso",
-		Address: "Jl. Merdeka 1",
-		Job:     "Backend Engineer",
-		Status:  "aktif",
+		Email:    "budi@mail.com",
+		Password: "rahasia123",
+		Name:     "Budi Santoso",
+		Address:  "Jl. Merdeka 1",
+		Job:      "Backend Engineer",
+		Status:   "aktif",
 	})
 	if err != nil {
 		t.Fatalf("setup gagal: %v", err)
@@ -103,10 +141,12 @@ func TestUserCreate_SpasiDipangkas(t *testing.T) {
 	uc, _ := setupUser()
 
 	user, err := uc.Create(context.Background(), usecase.CreateUserInput{
-		Name:    "  Siti Aminah  ",
-		Address: "  Jl. Mawar 9  ",
-		Job:     "  Designer  ",
-		Status:  "  aktif  ",
+		Email:    "siti@mail.com",
+		Password: "rahasia123",
+		Name:     "  Siti Aminah  ",
+		Address:  "  Jl. Mawar 9  ",
+		Job:      "  Designer  ",
+		Status:   "  aktif  ",
 	})
 	if err != nil {
 		t.Fatalf("tidak mengharapkan error: %v", err)
@@ -116,6 +156,208 @@ func TestUserCreate_SpasiDipangkas(t *testing.T) {
 	}
 	if user.Job != "Designer" {
 		t.Errorf("job = %q, ingin %q", user.Job, "Designer")
+	}
+}
+
+func TestUserCreate_PasswordDisimpanSebagaiHash(t *testing.T) {
+	uc, repo := setupUser()
+
+	user := seedUser(t, uc)
+
+	if user.Password == "rahasia123" {
+		t.Fatal("password polos tersimpan di entity — wajib di-hash dulu")
+	}
+	if user.Password != "hashed:rahasia123" {
+		t.Errorf("password = %q, ingin hasil hasher", user.Password)
+	}
+	// Pastikan yang masuk repository juga hash, bukan hanya objek yang dikembalikan.
+	if stored := repo.users[user.ID]; stored.Password != "hashed:rahasia123" {
+		t.Errorf("password di repo = %q, ingin hasil hasher", stored.Password)
+	}
+}
+
+func TestUserCreate_EmailDinormalisasiKeHurufKecil(t *testing.T) {
+	uc, _ := setupUser()
+
+	user, err := uc.Create(context.Background(), usecase.CreateUserInput{
+		Email:    "  Budi.Santoso@Mail.COM  ",
+		Password: "rahasia123",
+		Name:     "Budi Santoso",
+		Address:  "Jl. Merdeka 1",
+		Job:      "Backend Engineer",
+		Status:   "aktif",
+	})
+	if err != nil {
+		t.Fatalf("tidak mengharapkan error: %v", err)
+	}
+	if user.Email != "budi.santoso@mail.com" {
+		t.Errorf("email = %q, ingin %q", user.Email, "budi.santoso@mail.com")
+	}
+}
+
+func TestUserCreate_EmailDuplikatDitolak(t *testing.T) {
+	uc, _ := setupUser()
+
+	seedUser(t, uc) // memakai budi@mail.com
+
+	// Beda besar-kecil huruf harus tetap dianggap email yang sama.
+	_, err := uc.Create(context.Background(), usecase.CreateUserInput{
+		Email:    "BUDI@MAIL.COM",
+		Password: "rahasia123",
+		Name:     "Budi Kembar",
+		Address:  "Jl. Lain 2",
+		Job:      "Frontend Engineer",
+		Status:   "aktif",
+	})
+	if err == nil {
+		t.Fatal("ingin error conflict, dapat nil")
+	}
+	if got := kindOf(t, err); got != apperror.KindConflict {
+		t.Errorf("kind = %s, ingin %s", got, apperror.KindConflict)
+	}
+}
+
+func TestUserUpdate_EmailSamaDenganMilikSendiriBukanKonflik(t *testing.T) {
+	uc, _ := setupUser()
+
+	user := seedUser(t, uc)
+
+	updated, err := uc.Update(context.Background(), user.ID, usecase.UpdateUserInput{
+		Email: ptr("BUDI@mail.com"),
+	})
+	if err != nil {
+		t.Fatalf("mengirim email sendiri tidak boleh dianggap konflik: %v", err)
+	}
+	if updated.Email != "budi@mail.com" {
+		t.Errorf("email = %q, ingin ternormalisasi jadi %q", updated.Email, "budi@mail.com")
+	}
+}
+
+func TestUserUpdate_EmailMilikUserLainDitolak(t *testing.T) {
+	uc, _ := setupUser()
+	ctx := context.Background()
+
+	pertama := seedUser(t, uc) // budi@mail.com
+	kedua, err := uc.Create(ctx, usecase.CreateUserInput{
+		Email:    "siti@mail.com",
+		Password: "rahasia123",
+		Name:     "Siti Aminah",
+		Address:  "Jl. Mawar 9",
+		Job:      "Designer",
+		Status:   "aktif",
+	})
+	if err != nil {
+		t.Fatalf("setup gagal: %v", err)
+	}
+
+	_, err = uc.Update(ctx, kedua.ID, usecase.UpdateUserInput{Email: ptr(pertama.Email)})
+	if err == nil {
+		t.Fatal("ingin error conflict, dapat nil")
+	}
+	if got := kindOf(t, err); got != apperror.KindConflict {
+		t.Errorf("kind = %s, ingin %s", got, apperror.KindConflict)
+	}
+}
+
+func TestUserUpdate_PasswordTidakDikirimTidakBerubah(t *testing.T) {
+	uc, _ := setupUser()
+
+	user := seedUser(t, uc)
+	lama := user.Password
+
+	updated, err := uc.Update(context.Background(), user.ID, usecase.UpdateUserInput{
+		Job: ptr("Tech Lead"),
+	})
+	if err != nil {
+		t.Fatalf("tidak mengharapkan error: %v", err)
+	}
+	if updated.Password != lama {
+		t.Errorf("password ikut berubah jadi %q, seharusnya tetap %q", updated.Password, lama)
+	}
+}
+
+func TestUserUpdate_PasswordBaruIkutDiHash(t *testing.T) {
+	uc, _ := setupUser()
+
+	user := seedUser(t, uc)
+
+	updated, err := uc.Update(context.Background(), user.ID, usecase.UpdateUserInput{
+		Password: ptr("passwordbaru"),
+	})
+	if err != nil {
+		t.Fatalf("tidak mengharapkan error: %v", err)
+	}
+	if updated.Password == "passwordbaru" {
+		t.Fatal("password polos tersimpan — wajib di-hash dulu")
+	}
+	if updated.Password != "hashed:passwordbaru" {
+		t.Errorf("password = %q, ingin hasil hasher", updated.Password)
+	}
+}
+
+func TestUserCreate_RoleKosongJadiUserBiasa(t *testing.T) {
+	uc, _ := setupUser()
+
+	// seedUser tidak mengirim Role sama sekali.
+	user := seedUser(t, uc)
+
+	if user.Role != entity.RoleUser {
+		t.Errorf("role = %q, ingin default %q", user.Role, entity.RoleUser)
+	}
+	if user.IsAdmin() {
+		t.Error("role kosong tidak boleh berarti admin — default harus yang paling sedikit haknya")
+	}
+}
+
+func TestUserCreate_RoleAsingDitolak(t *testing.T) {
+	uc, _ := setupUser()
+
+	_, err := uc.Create(context.Background(), usecase.CreateUserInput{
+		Email:    "root@mail.com",
+		Password: "rahasia123",
+		Name:     "Mau Jadi Root",
+		Address:  "Jl. X",
+		Job:      "QA",
+		Status:   "aktif",
+		Role:     "superadmin",
+	})
+	if err == nil {
+		t.Fatal("ingin error validasi, dapat nil")
+	}
+	if got := kindOf(t, err); got != apperror.KindValidation {
+		t.Errorf("kind = %s, ingin %s", got, apperror.KindValidation)
+	}
+}
+
+func TestUserUpdate_RoleBisaDipromosikan(t *testing.T) {
+	uc, _ := setupUser()
+
+	user := seedUser(t, uc)
+
+	updated, err := uc.Update(context.Background(), user.ID, usecase.UpdateUserInput{
+		Role: ptr("admin"),
+	})
+	if err != nil {
+		t.Fatalf("tidak mengharapkan error: %v", err)
+	}
+	if !updated.IsAdmin() {
+		t.Errorf("role = %q, ingin %q", updated.Role, entity.RoleAdmin)
+	}
+}
+
+func TestUserUpdate_RoleAsingDitolak(t *testing.T) {
+	uc, _ := setupUser()
+
+	user := seedUser(t, uc)
+
+	_, err := uc.Update(context.Background(), user.ID, usecase.UpdateUserInput{
+		Role: ptr("superadmin"),
+	})
+	if err == nil {
+		t.Fatal("ingin error validasi, dapat nil")
+	}
+	if got := kindOf(t, err); got != apperror.KindValidation {
+		t.Errorf("kind = %s, ingin %s", got, apperror.KindValidation)
 	}
 }
 

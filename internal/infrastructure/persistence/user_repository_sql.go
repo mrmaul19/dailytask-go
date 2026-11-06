@@ -11,12 +11,7 @@ import (
 	"daily-task-go/internal/domain/repository"
 )
 
-// userColumns dipakai bersama oleh seluruh SELECT/RETURNING di file ini
-// supaya urutan kolomnya selalu sama dengan urutan Scan di scanUser.
-//
-// Tanpa COALESCE seperti di tabel tasks, karena tabel users dibuat langsung
-// oleh migrasi dengan seluruh kolom teks NOT NULL.
-const userColumns = `id, name, address, job, status, created_at, updated_at`
+const userColumns = `id, email, password, name, address, job, status, role, created_at, updated_at`
 
 type userRepositorySQL struct {
 	db *sql.DB
@@ -30,10 +25,13 @@ func scanUser(s rowScanner) (*entity.User, error) {
 	var user entity.User
 	err := s.Scan(
 		&user.ID,
+		&user.Email,
+		&user.Password,
 		&user.Name,
 		&user.Address,
 		&user.Job,
 		&user.Status,
+		&user.Role,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -45,12 +43,12 @@ func scanUser(s rowScanner) (*entity.User, error) {
 
 func (r *userRepositorySQL) Create(ctx context.Context, user *entity.User) error {
 	const query = `
-		INSERT INTO users (name, address, job, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, now(), now())
+		INSERT INTO users (email, password, name, address, job, status, role, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
 		RETURNING ` + userColumns
 
 	row := r.db.QueryRowContext(ctx, query,
-		user.Name, user.Address, user.Job, user.Status)
+		user.Email, user.Password, user.Name, user.Address, user.Job, user.Status, user.Role)
 
 	created, err := scanUser(row)
 	if err != nil {
@@ -120,21 +118,40 @@ func (r *userRepositorySQL) FindByID(ctx context.Context, id uint) (*entity.User
 	return user, nil
 }
 
+// FindByEmail memakai lower(email) agar cocok dengan unique index
+// users_email_unique_idx, sehingga pencarian ini memakai index itu
+// dan perbandingannya case-insensitive.
+func (r *userRepositorySQL) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
+	const query = `SELECT ` + userColumns + ` FROM users WHERE lower(email) = lower($1) AND ` + notDeleted
+
+	user, err := scanUser(r.db.QueryRowContext(ctx, query, email))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, entity.ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 // Update menimpa kolom yang boleh diubah, lalu mengembalikan baris hasilnya
 // lewat RETURNING -- jadi UpdatedAt ikut ter-refresh tanpa query tambahan.
 func (r *userRepositorySQL) Update(ctx context.Context, user *entity.User) error {
 	const query = `
 		UPDATE users SET
-			name       = $1,
-			address    = $2,
-			job        = $3,
-			status     = $4,
+			email      = $1,
+			password   = $2,
+			name       = $3,
+			address    = $4,
+			job        = $5,
+			status     = $6,
+			role       = $7,
 			updated_at = now()
-		WHERE id = $5 AND ` + notDeleted + `
+		WHERE id = $8 AND ` + notDeleted + `
 		RETURNING ` + userColumns
 
 	row := r.db.QueryRowContext(ctx, query,
-		user.Name, user.Address, user.Job, user.Status, user.ID)
+		user.Email, user.Password, user.Name, user.Address, user.Job, user.Status, user.Role, user.ID)
 
 	updated, err := scanUser(row)
 	if errors.Is(err, sql.ErrNoRows) {

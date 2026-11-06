@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -39,10 +40,31 @@ type Storage struct {
 	AllowedExt  []string
 }
 
+type Auth struct {
+	// JWTSecret menandatangani token. Siapa pun yang tahu nilai ini bisa
+	// membuat token atas nama user mana pun, jadi nilainya wajib diganti
+	// di luar development. main.go menolak start kalau masih memakai
+	// DefaultJWTSecret saat APP_ENV=production.
+	JWTSecret string
+	// JWTTTL adalah umur token. Token yang sudah terbit tidak bisa ditarik
+	// kembali, jadi makin pendek makin kecil dampaknya kalau bocor.
+	JWTTTL time.Duration
+	// RateLimitMax dan RateLimitWindow membatasi percobaan di /auth/*.
+	// Nilai bawaan 10 per menit: cukup longgar untuk orang yang salah ketik
+	// beberapa kali, cukup ketat untuk menghentikan penebakan massal.
+	RateLimitMax    int
+	RateLimitWindow time.Duration
+}
+
+// DefaultJWTSecret hanya untuk development, supaya aplikasi bisa langsung
+// dijalankan setelah clone tanpa menyiapkan apa pun.
+const DefaultJWTSecret = "dev-secret-wajib-diganti-di-production"
+
 type Config struct {
 	App      App
 	Database Database
 	Storage  Storage
+	Auth     Auth
 }
 
 // Load membaca file .env (kalau ada) lalu environment variable.
@@ -70,6 +92,12 @@ func Load() *Config {
 			UploadDir:   env("UPLOAD_DIR", "uploads"),
 			MaxUploadMB: envInt("MAX_UPLOAD_MB", 5),
 			AllowedExt:  splitAndTrim(env("ALLOWED_EXT", ".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.zip")),
+		},
+		Auth: Auth{
+			JWTSecret:       env("JWT_SECRET", DefaultJWTSecret),
+			JWTTTL:          envDuration("JWT_TTL", 24*time.Hour),
+			RateLimitMax:    int(envInt("AUTH_RATE_LIMIT_MAX", 10)),
+			RateLimitWindow: envDuration("AUTH_RATE_LIMIT_WINDOW", time.Minute),
 		},
 	}
 }
@@ -108,6 +136,16 @@ func (s Storage) MaxUploadBytes() int64 { return s.MaxUploadMB * 1024 * 1024 }
 func env(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// envDuration membaca durasi bergaya Go: "30m", "24h", "168h".
+func envDuration(key string, fallback time.Duration) time.Duration {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
+			return parsed
+		}
 	}
 	return fallback
 }

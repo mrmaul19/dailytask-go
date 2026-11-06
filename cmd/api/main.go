@@ -25,6 +25,7 @@ import (
 	"daily-task-go/internal/delivery/http/route"
 	"daily-task-go/internal/infrastructure/database"
 	"daily-task-go/internal/infrastructure/persistence"
+	infrasecurity "daily-task-go/internal/infrastructure/security"
 	infrastorage "daily-task-go/internal/infrastructure/storage"
 	"daily-task-go/internal/usecase"
 	"daily-task-go/pkg/validator"
@@ -40,6 +41,13 @@ import (
 // @BasePath	/
 // @schemes	http https
 //
+// @securityDefinitions.apikey	BearerAuth
+// @in							header
+// @name						Authorization
+// @description				Token dari /api/v1/auth/login. Isi dengan: Bearer {token}
+//
+// @tag.name			Auth
+// @tag.description	Register & login — satu-satunya grup yang bisa diakses tanpa token
 // @tag.name			Health
 // @tag.description	Liveness check
 // @tag.name			Tasks
@@ -50,6 +58,16 @@ import (
 // @tag.description	Data user
 func main() {
 	cfg := config.Load()
+
+	// Secret bawaan hanya boleh dipakai saat development. Diperiksa di sini,
+	// saat start — bukan saat login pertama dicoba, yang bisa jadi baru
+	// ketahuan setelah aplikasi sudah lama berjalan di production.
+	if cfg.Auth.JWTSecret == config.DefaultJWTSecret {
+		if cfg.App.Env == "production" {
+			log.Fatal("JWT_SECRET masih memakai nilai bawaan — wajib diganti di production")
+		}
+		log.Println("PERINGATAN: JWT_SECRET memakai nilai bawaan, hanya aman untuk development")
+	}
 
 	// Host pada spec diambil dari config, bukan di-hardcode lewat anotasi
 	// @host, supaya tombol "Try it out" tetap benar saat port atau domain ganti.
@@ -90,9 +108,16 @@ func main() {
 	goalsUsecase := usecase.NewGoalsUsecase(goalsRepo)
 	goalsHandler := handler.NewGoalsHandler(goalsUsecase, validate)
 
+	// cost 0 = pakai bcrypt.DefaultCost.
+	passwordHasher := infrasecurity.NewBcryptHasher(0)
+	tokenIssuer := infrasecurity.NewJWTIssuer(cfg.Auth.JWTSecret, cfg.Auth.JWTTTL)
+
 	userRepo := persistence.NewUserRepository(db)
-	userUsecase := usecase.NewUserUsecase(userRepo)
+	userUsecase := usecase.NewUserUsecase(userRepo, passwordHasher)
 	userHandler := handler.NewUserHandler(userUsecase, validate)
+
+	authUsecase := usecase.NewAuthUsecase(userUsecase, userRepo, passwordHasher, tokenIssuer)
+	authHandler := handler.NewAuthHandler(authUsecase, validate)
 
 	// --- http server ---
 	app := fiber.New(fiber.Config{
@@ -108,10 +133,16 @@ func main() {
 	app.Use(cors.New())
 
 	route.Register(app, route.Deps{
-		TaskHandler:  taskHandler,
-		GoalsHandler: goalsHandler,
-		UserHandler:  userHandler,
-		EnableDocs:   cfg.App.EnableDocs,
+		TaskHandler:    taskHandler,
+		GoalsHandler:   goalsHandler,
+		UserHandler:    userHandler,
+		AuthHandler:    authHandler,
+		AuthMiddleware: middleware.Auth(tokenIssuer),
+		// Dipasang setelah AuthMiddleware di route.go — ia membaca role
+		// yang ditaruh AuthMiddleware di c.Locals.
+		AdminMiddleware: middleware.RequireAdmin(),
+		AuthRateLimit:   middleware.RateLimit(cfg.Auth.RateLimitMax, cfg.Auth.RateLimitWindow),
+		EnableDocs:      cfg.App.EnableDocs,
 	})
 
 	// --- graceful shutdown ---

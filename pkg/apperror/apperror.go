@@ -11,10 +11,17 @@ import (
 type Kind string
 
 const (
-	KindValidation Kind = "VALIDATION_ERROR"
-	KindNotFound   Kind = "NOT_FOUND"
-	KindConflict   Kind = "CONFLICT"
-	KindInternal   Kind = "INTERNAL_ERROR"
+	KindValidation   Kind = "VALIDATION_ERROR"
+	KindNotFound     Kind = "NOT_FOUND"
+	KindConflict     Kind = "CONFLICT"
+	KindInternal     Kind = "INTERNAL_ERROR"
+	KindUnauthorized Kind = "UNAUTHORIZED"
+	// KindForbidden berbeda maksud dari KindUnauthorized:
+	//   Unauthorized = "saya tidak tahu kamu siapa"   -> 401, silakan login
+	//   Forbidden    = "saya tahu kamu siapa, tapi kamu tidak boleh" -> 403
+	// Membalas 401 untuk kasus kedua membuat client mengira tokennya rusak
+	// lalu mencoba login berulang kali, padahal login ulang tidak menolong.
+	KindForbidden Kind = "FORBIDDEN"
 )
 
 type AppError struct {
@@ -60,4 +67,12 @@ func From(err error) *AppError {
 		return appErr
 	}
 	return Internal("terjadi kesalahan pada server", err)
+}
+
+func Forbidden(message string) *AppError {
+	return &AppError{Kind: KindForbidden, Message: message}
+}
+
+func Unauthorized(message string) *AppError {
+	return &AppError{Kind: KindUnauthorized, Message: message}
 }

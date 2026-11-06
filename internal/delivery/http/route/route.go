@@ -15,6 +15,18 @@ type Deps struct {
 	TaskHandler  *handler.TaskHandler
 	GoalsHandler *handler.GoalsHandler
 	UserHandler  *handler.UserHandler
+	AuthHandler  *handler.AuthHandler
+
+	// AuthMiddleware sudah jadi fiber.Handler, bukan port TokenIssuer.
+	// Dengan begitu paket route tidak perlu tahu-menahu soal JWT — ia hanya
+	// memasang handler, persis seperti perlakuannya terhadap handler lain.
+	AuthMiddleware fiber.Handler
+	// AdminMiddleware WAJIB dipasang setelah AuthMiddleware; ia membaca role
+	// yang ditaruh AuthMiddleware di c.Locals.
+	AdminMiddleware fiber.Handler
+	// AuthRateLimit membatasi percobaan di /auth/*, supaya password tidak
+	// bisa ditebak terus-menerus.
+	AuthRateLimit fiber.Handler
 
 	// EnableDocs menentukan apakah UI Swagger di /swagger/* didaftarkan.
 	// Diisi dari config (ENABLE_DOCS) supaya bisa dimatikan di production.
@@ -31,6 +43,15 @@ func Register(app *fiber.App, deps Deps) {
 	}
 
 	v1 := app.Group("/api/v1")
+
+	// Grup auth WAJIB tanpa AuthMiddleware — kalau ikut dilindungi, tidak ada
+	// satu pun cara untuk memperoleh token pertama kali.
+	//
+	// Justru karena terbuka, grup ini yang paling butuh rate limit: ia menerima
+	// password dan membalas apakah password itu benar.
+	auth := v1.Group("/auth", deps.AuthRateLimit)
+	auth.Post("/register", deps.AuthHandler.Register)
+	auth.Post("/login", deps.AuthHandler.Login)
 
 	tasks := v1.Group("/tasks")
 	tasks.Post("/", deps.TaskHandler.Create)
@@ -49,7 +70,12 @@ func Register(app *fiber.App, deps Deps) {
 	goals.Put("/:id", deps.GoalsHandler.Update)
 	goals.Delete("/:id", deps.GoalsHandler.Delete)
 
-	users := v1.Group("/users")
+	// Pengelolaan user butuh token DAN role admin. Urutannya penting:
+	// AuthMiddleware mengisi role, AdminMiddleware membacanya.
+	//
+	// Pendaftaran mandiri lewat /auth/register, yang memaksa status dan role
+	// default serta tidak menerima field sebebas di sini.
+	users := v1.Group("/users", deps.AuthMiddleware, deps.AdminMiddleware)
 	users.Post("/", deps.UserHandler.Create)
 	users.Get("/", deps.UserHandler.List)
 	users.Get("/:id", deps.UserHandler.GetByID)
