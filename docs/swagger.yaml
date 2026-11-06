@@ -1,0 +1,901 @@
+basePath: /
+definitions:
+  dto.CreateGoalsRequest:
+    properties:
+      category:
+        maxLength: 100
+        type: string
+      priority:
+        maxLength: 100
+        type: string
+      progress:
+        maxLength: 100
+        type: string
+      status:
+        maxLength: 100
+        type: string
+      title:
+        maxLength: 255
+        minLength: 3
+        type: string
+    required:
+    - category
+    - priority
+    - status
+    - title
+    type: object
+  dto.CreateUserRequest:
+    properties:
+      address:
+        maxLength: 255
+        type: string
+      job:
+        maxLength: 100
+        type: string
+      name:
+        maxLength: 100
+        minLength: 3
+        type: string
+      status:
+        maxLength: 100
+        type: string
+    required:
+    - address
+    - job
+    - name
+    - status
+    type: object
+  dto.ErrorEnvelope:
+    properties:
+      errors:
+        additionalProperties:
+          type: string
+        type: object
+      message:
+        example: data tidak valid
+        type: string
+      success:
+        example: false
+        type: boolean
+    type: object
+  dto.GoalsEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/dto.GoalsResponse'
+      message:
+        example: detail goals berhasil diambil
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.GoalsListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/dto.GoalsResponse'
+        type: array
+      message:
+        example: daftar goals berhasil diambil
+        type: string
+      meta:
+        $ref: '#/definitions/response.Meta'
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.GoalsResponse:
+    properties:
+      category:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      priority:
+        type: string
+      progress:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  dto.HealthData:
+    properties:
+      status:
+        example: ok
+        type: string
+    type: object
+  dto.HealthEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/dto.HealthData'
+      message:
+        example: service berjalan normal
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.MessageEnvelope:
+    properties:
+      message:
+        example: task berhasil dihapus
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.TaskEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/dto.TaskResponse'
+      message:
+        example: detail task berhasil diambil
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.TaskListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/dto.TaskResponse'
+        type: array
+      message:
+        example: daftar task berhasil diambil
+        type: string
+      meta:
+        $ref: '#/definitions/response.Meta'
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.TaskResponse:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      file_name:
+        type: string
+      file_url:
+        type: string
+      id:
+        type: integer
+      judul:
+        type: string
+      no_task:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  dto.UpdateGoalsRequest:
+    properties:
+      category:
+        maxLength: 100
+        type: string
+      priority:
+        maxLength: 100
+        type: string
+      progress:
+        maxLength: 100
+        type: string
+      status:
+        maxLength: 100
+        type: string
+      title:
+        maxLength: 255
+        minLength: 3
+        type: string
+    type: object
+  dto.UpdateUserRequest:
+    properties:
+      address:
+        maxLength: 255
+        type: string
+      job:
+        maxLength: 100
+        type: string
+      name:
+        maxLength: 100
+        minLength: 3
+        type: string
+      status:
+        maxLength: 100
+        type: string
+    required:
+    - address
+    - job
+    - name
+    - status
+    type: object
+  dto.UserEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/dto.UserResponse'
+      message:
+        example: detail user berhasil diambil
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.UserListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/dto.UserResponse'
+        type: array
+      message:
+        example: daftar user berhasil diambil
+        type: string
+      meta:
+        $ref: '#/definitions/response.Meta'
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.UserResponse:
+    properties:
+      address:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      job:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  response.Meta:
+    properties:
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+info:
+  contact: {}
+  description: |-
+    REST API untuk mencatat daily task (dengan lampiran file), goals, dan users.
+    Dibangun dengan Go Fiber + database/sql (driver pgx) + PostgreSQL, tanpa ORM,
+    mengikuti Clean Architecture. Spec ini digenerate dari anotasi di handler
+    oleh `swag init`, jadi ia selalu ikut kode — bukan dokumen terpisah yang gampang basi.
+  title: Daily Task API
+  version: "1.0"
+paths:
+  /api/v1/goals:
+    get:
+      description: '`search` dicocokkan ke `title` dan `category` (case-insensitive,
+        pakai ILIKE).'
+      parameters:
+      - description: Kata kunci pencarian
+        in: query
+        name: search
+        type: string
+      - default: 1
+        description: Halaman, mulai dari 1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 10
+        description: Jumlah data per halaman
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.GoalsListEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Daftar goals
+      tags:
+      - Goals
+    post:
+      consumes:
+      - application/json
+      description: Goals tidak punya lampiran file, jadi request dan response-nya
+        JSON murni.
+      parameters:
+      - description: Data goals
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateGoalsRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dto.GoalsEnvelope'
+        "400":
+          description: validasi gagal
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Buat goals baru
+      tags:
+      - Goals
+  /api/v1/goals/{id}:
+    delete:
+      description: 'Soft delete: baris hanya diberi `deleted_at`, tidak benar-benar
+        dihapus dari tabel.'
+      parameters:
+      - description: ID goals
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.MessageEnvelope'
+        "400":
+          description: id bukan angka positif
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: goals tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Hapus goals
+      tags:
+      - Goals
+    get:
+      description: Goals yang sudah dihapus (soft delete) tidak ikut terambil.
+      parameters:
+      - description: ID goals
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.GoalsEnvelope'
+        "400":
+          description: id bukan angka positif
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: goals tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Detail goals
+      tags:
+      - Goals
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Update sebagian field (partial update). Field yang tidak dikirim tetap memakai nilai lama,
+        field yang dikirim kosong ditolak dengan 400.
+      parameters:
+      - description: ID goals
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      - description: Field yang mau diubah saja
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateGoalsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.GoalsEnvelope'
+        "400":
+          description: validasi gagal atau id tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: goals tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Perbarui goals
+      tags:
+      - Goals
+  /api/v1/tasks:
+    get:
+      description: |-
+        Mengambil daftar task dengan pencarian dan paginasi.
+        `search` dicocokkan ke `no_task` dan `judul` (case-insensitive, pakai ILIKE).
+      parameters:
+      - description: Kata kunci pencarian
+        in: query
+        name: search
+        type: string
+      - default: 1
+        description: Halaman, mulai dari 1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 10
+        description: Jumlah data per halaman
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.TaskListEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Daftar task
+      tags:
+      - Tasks
+    post:
+      consumes:
+      - multipart/form-data
+      - application/json
+      description: |-
+        Membuat task baru, dengan atau tanpa lampiran file.
+        Kirim sebagai `multipart/form-data` kalau ada file, atau `application/json` kalau tanpa file.
+        `no_task` boleh dikosongkan — server akan membuatnya dengan format `TASK-YYYYMMDD-XXXX`.
+      parameters:
+      - description: Nomor task, wajib unik. Digenerate otomatis kalau kosong
+        in: formData
+        maxLength: 50
+        name: no_task
+        type: string
+      - description: Judul task
+        in: formData
+        maxLength: 255
+        minLength: 3
+        name: judul
+        required: true
+        type: string
+      - description: Keterangan task
+        in: formData
+        maxLength: 2000
+        name: description
+        type: string
+      - description: Lampiran. Ekstensi & ukuran dibatasi ALLOWED_EXT / MAX_UPLOAD_MB
+        in: formData
+        name: file
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dto.TaskEnvelope'
+        "400":
+          description: validasi gagal atau ekstensi/ukuran file ditolak
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "409":
+          description: no_task sudah dipakai task lain
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Buat task baru
+      tags:
+      - Tasks
+  /api/v1/tasks/{id}:
+    delete:
+      description: 'Soft delete: baris hanya diberi `deleted_at`, tetapi lampiran
+        di disk dihapus permanen.'
+      parameters:
+      - description: ID task
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.MessageEnvelope'
+        "400":
+          description: id bukan angka positif
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: task tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Hapus task
+      tags:
+      - Tasks
+    get:
+      description: Mengambil satu task berdasarkan id. Task yang sudah dihapus (soft
+        delete) tidak ikut terambil.
+      parameters:
+      - description: ID task
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.TaskEnvelope'
+        "400":
+          description: id bukan angka positif
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: task tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Detail task
+      tags:
+      - Tasks
+    put:
+      consumes:
+      - multipart/form-data
+      - application/json
+      description: |-
+        Update sebagian field (partial update). Field yang tidak dikirim tetap memakai nilai lama,
+        field yang dikirim kosong ditolak dengan 400.
+        Mengirim `file` baru akan menghapus lampiran lama dari disk setelah DB sukses;
+        `remove_file=true` melepas lampiran tanpa menggantinya.
+      parameters:
+      - description: ID task
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      - description: Nomor task, wajib unik
+        in: formData
+        maxLength: 50
+        name: no_task
+        type: string
+      - description: Judul task
+        in: formData
+        maxLength: 255
+        minLength: 3
+        name: judul
+        type: string
+      - description: Keterangan task
+        in: formData
+        maxLength: 2000
+        name: description
+        type: string
+      - description: Lampiran pengganti
+        in: formData
+        name: file
+        type: file
+      - description: true untuk melepas lampiran yang ada
+        in: formData
+        name: remove_file
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.TaskEnvelope'
+        "400":
+          description: validasi gagal, id tidak valid, atau file ditolak
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: task tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "409":
+          description: no_task sudah dipakai task lain
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Perbarui task
+      tags:
+      - Tasks
+  /api/v1/tasks/{id}/download:
+    get:
+      description: |-
+        Mengirim file lampiran sebagai stream. File tidak diserve lewat folder static:
+        nama file di disk diacak dan path-nya dibaca dari DB, jadi URL-nya tidak bisa ditebak.
+      parameters:
+      - description: ID task
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: isi file lampiran
+          schema:
+            type: file
+        "400":
+          description: id bukan angka positif
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: task tidak ditemukan atau tidak punya lampiran
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Unduh lampiran task
+      tags:
+      - Tasks
+  /api/v1/users:
+    get:
+      description: '`search` dicocokkan ke `name` dan `job` (case-insensitive, pakai
+        ILIKE).'
+      parameters:
+      - description: Kata kunci pencarian
+        in: query
+        name: search
+        type: string
+      - default: 1
+        description: Halaman, mulai dari 1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 10
+        description: Jumlah data per halaman
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.UserListEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Daftar user
+      tags:
+      - Users
+    post:
+      consumes:
+      - application/json
+      description: Semua field wajib diisi.
+      parameters:
+      - description: Data user
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dto.UserEnvelope'
+        "400":
+          description: validasi gagal
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Buat user baru
+      tags:
+      - Users
+  /api/v1/users/{id}:
+    delete:
+      description: 'Soft delete: baris hanya diberi `deleted_at`, tidak benar-benar
+        dihapus dari tabel.'
+      parameters:
+      - description: ID user
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.MessageEnvelope'
+        "400":
+          description: id bukan angka positif
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: user tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Hapus user
+      tags:
+      - Users
+    get:
+      description: User yang sudah dihapus (soft delete) tidak ikut terambil.
+      parameters:
+      - description: ID user
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.UserEnvelope'
+        "400":
+          description: id bukan angka positif
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: user tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Detail user
+      tags:
+      - Users
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Catatan: `UpdateUserRequest` masih memakai `validate:"required"` pada field pointer,
+        jadi keempat field wajib dikirim meski usecase-nya sudah mendukung partial update.
+      parameters:
+      - description: ID user
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      - description: Data user
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.UserEnvelope'
+        "400":
+          description: validasi gagal atau id tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: user tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      summary: Perbarui user
+      tags:
+      - Users
+  /health:
+    get:
+      description: Dipakai untuk liveness check. Tidak menyentuh database.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.HealthEnvelope'
+      summary: Cek kesehatan service
+      tags:
+      - Health
+schemes:
+- http
+- https
+swagger: "2.0"
+tags:
+- description: Liveness check
+  name: Health
+- description: Daily task, satu-satunya resource yang punya lampiran file
+  name: Tasks
+- description: Target/goals, JSON murni
+  name: Goals
+- description: Data user
+  name: Users

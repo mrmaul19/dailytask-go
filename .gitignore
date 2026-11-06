@@ -1,0 +1,61 @@
+# ---------- konfigurasi & rahasia ----------
+# .env berisi kredensial database, jangan pernah masuk repo.
+# .env.example sengaja TIDAK diabaikan supaya orang lain tahu env apa saja yang dibutuhkan.
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---------- binary hasil build ----------
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+daily-task
+daily-task.exe
+
+# ---------- test & coverage ----------
+*.test
+*.out
+coverage.*
+
+# ---------- go workspace (lokal per mesin) ----------
+go.work
+go.work.sum
+
+# ---------- upload runtime ----------
+# Isi folder diabaikan, tapi foldernya tetap ada di repo lewat .gitkeep,
+# karena localStorage butuh direktori ini sudah ada saat aplikasi start.
+uploads/*
+!uploads/.gitkeep
+
+# ---------- log & file sementara ----------
+*.log
+tmp/
+temp/
+
+# ---------- editor / IDE ----------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# Yang sengaja TIDAK diabaikan, walau kelihatan seperti file generate:
+#
+#   docs/docs.go, docs/swagger.json, docs/swagger.yaml
+#     Hasil `swag init`, tapi WAJIB ikut di-commit — cmd/api/main.go
+#     meng-import "daily-task-go/docs", jadi `go build` gagal di mesin
+#     lain kalau file-file itu tidak ada.
+#
+#   go.sum
+#     Mengunci versi dependency, harus ikut di-commit.
+# ============================================================

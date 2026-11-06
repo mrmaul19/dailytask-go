@@ -1,0 +1,1107 @@
+{
+  "info": {
+    "name": "Daily Task API (Go Fiber + Clean Architecture)",
+    "description": "Mini project daily task (tasks + goals). Backend Go Fiber + database/sql (pgx), tanpa ORM.\n\nCara pakai:\n1. Jalankan API: `go run ./cmd/api`\n2. Pilih environment \"Daily Task API - Local\", atau biarkan pakai variable koleksi `baseUrl`.\n3. Jalankan request berurutan dari atas. Request \"Create task\" dan \"Create goals\" otomatis menyimpan `taskId` / `goalsId`, jadi request Detail/Update/Download/Delete langsung terpakai tanpa ketik ID manual.\n\nUntuk request yang mengirim file, klik kolom `file` di tab Body > form-data lalu pilih file dari komputer Anda (Postman tidak bisa menyimpan path file di dalam koleksi).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "taskId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "goalsId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "Cek service hidup. Kalau gagal connect, pastikan `go run ./cmd/api` sudah jalan dan Postgres aktif."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"service ok\", () => {",
+              "    pm.expect(pm.response.json().data.status).to.eql(\"ok\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "Tasks",
+      "description": "CRUD daily task.",
+      "item": [
+        {
+          "name": "Create task (dengan file) — multipart",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "no_task",
+                  "value": "",
+                  "type": "text",
+                  "disabled": true,
+                  "description": "Opsional. Kalau dikosongkan, server generate TASK-YYYYMMDD-XXXX. Wajib unik."
+                },
+                {
+                  "key": "judul",
+                  "value": "Belajar Clean Architecture",
+                  "type": "text",
+                  "description": "Wajib, 3-255 karakter."
+                },
+                {
+                  "key": "description",
+                  "value": "Bikin layer domain, usecase, delivery",
+                  "type": "text",
+                  "description": "Opsional, maksimal 2000 karakter."
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Opsional. Pilih file dari komputer. Default ekstensi yang diizinkan: .pdf .doc .docx .xls .xlsx .png .jpg .jpeg .zip, maksimal 5 MB."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks"]
+            },
+            "description": "Buat task baru beserta lampiran. Jangan set header Content-Type manual — Postman mengisinya sendiri lengkap dengan boundary."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test(\"response sukses\", () => pm.expect(body.success).to.be.true);",
+                  "pm.test(\"no_task tergenerate\", () => {",
+                  "    pm.expect(body.data.no_task).to.match(/^TASK-/);",
+                  "});",
+                  "",
+                  "// simpan id supaya request berikutnya tidak perlu ketik ID manual",
+                  "pm.collectionVariables.set(\"taskId\", body.data.id);",
+                  "console.log(\"taskId disimpan:\", body.data.id);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create task (tanpa file) — JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"no_task\": \"TASK-001\",\n  \"judul\": \"Setup Database Postgres\",\n  \"description\": \"migrasi tabel tasks\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks"]
+            },
+            "description": "Endpoint yang sama juga menerima JSON kalau tidak ada file yang diupload."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"no_task sesuai yang dikirim\", () => {",
+                  "    pm.expect(pm.response.json().data.no_task).to.eql(\"TASK-001\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "List tasks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Default 1."
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Default 10, maksimal 100."
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Cari di no_task, judul, dan description. Case-insensitive (ILIKE)."
+                }
+              ]
+            },
+            "description": "Daftar task terbaru lebih dulu, lengkap dengan `meta` paginasi."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test(\"data berupa array\", () => pm.expect(body.data).to.be.an(\"array\"));",
+                  "pm.test(\"ada meta paginasi\", () => {",
+                  "    pm.expect(body.meta).to.have.property(\"total_pages\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "List tasks — pencarian",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks?search=POSTGRES&page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks"],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "POSTGRES",
+                  "description": "Sengaja huruf besar semua untuk membuktikan pencarian case-insensitive."
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Jalankan \"Create task (tanpa file) — JSON\" lebih dulu. Keyword huruf besar tetap menemukan judul \"Setup Database Postgres\" karena query memakai ILIKE, bukan LIKE."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"pencarian case-insensitive bekerja\", () => {",
+                  "    pm.expect(pm.response.json().data.length).to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get task by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks", "{{taskId}}"]
+            },
+            "description": "`taskId` terisi otomatis setelah menjalankan \"Create task (dengan file)\"."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"id sesuai\", () => {",
+                  "    pm.expect(String(pm.response.json().data.id)).to.eql(pm.collectionVariables.get(\"taskId\"));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Download lampiran",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}/download",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks", "{{taskId}}", "download"]
+            },
+            "description": "Isi `file_url` pada response task mengarah ke endpoint ini. File diambil berdasarkan data di database, jadi nama file di disk (yang diacak) tidak pernah terekspos. Pakai Send > Send and Download untuk menyimpan hasilnya."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"dikirim sebagai attachment\", () => {",
+                  "    pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"attachment\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update task — sebagian field (JSON)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"judul\": \"Judul sudah diubah\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks", "{{taskId}}"]
+            },
+            "description": "Field yang tidak dikirim tetap memakai nilai lama. Coba hapus `judul` dan kirim `description` saja — judul tidak akan berubah."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"judul berubah\", () => pm.expect(hasil.judul).to.eql(\"Judul sudah diubah\"));",
+                  "pm.test(\"description tidak ikut terhapus\", () => {",
+                  "    pm.expect(hasil.description).to.not.eql(\"\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update task — ganti lampiran (multipart)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "description",
+                  "value": "lampiran sudah direvisi",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Pilih file pengganti. File lama otomatis dihapus dari disk setelah database berhasil diupdate."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks", "{{taskId}}"]
+            },
+            "description": "Cek folder `uploads/` sebelum dan sesudah request ini — jumlah filenya tetap satu, tidak menumpuk."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"nama file ikut terupdate\", () => {",
+                  "    pm.expect(pm.response.json().data.file_name).to.not.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update task — lepas lampiran",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"remove_file\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks", "{{taskId}}"]
+            },
+            "description": "Melepas lampiran tanpa menghapus task. File fisiknya ikut dihapus dari folder upload."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"file_url sudah hilang\", () => {",
+                  "    pm.expect(pm.response.json().data.file_url).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Delete task",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks", "{{taskId}}"]
+            },
+            "description": "Menghapus task beserta lampirannya di disk."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"response sukses\", () => pm.expect(pm.response.json().success).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Goals",
+      "description": "CRUD goals. JSON murni — goals tidak punya lampiran file.",
+      "item": [
+        {
+          "name": "Create goals — JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Belajar Clean Architecture\",\n  \"category\": \"belajar\",\n  \"priority\": \"tinggi\",\n  \"status\": \"berjalan\",\n  \"progress\": \"10%\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals"]
+            },
+            "description": "Buat goals baru. Field wajib: title (3-255), category, priority, status (maksimal 100 karakter). Field progress opsional."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test(\"response sukses\", () => pm.expect(body.success).to.be.true);",
+                  "pm.test(\"id terisi\", () => pm.expect(body.data.id).to.be.above(0));",
+                  "pm.test(\"field tersimpan sesuai kiriman\", () => {",
+                  "    pm.expect(body.data.title).to.eql(\"Belajar Clean Architecture\");",
+                  "    pm.expect(body.data.progress).to.eql(\"10%\");",
+                  "});",
+                  "",
+                  "// simpan id supaya request berikutnya tidak perlu ketik ID manual",
+                  "pm.collectionVariables.set(\"goalsId\", body.data.id);",
+                  "console.log(\"goalsId disimpan:\", body.data.id);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "List goals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Default 1."
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Default 10, maksimal 100."
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Cari di title dan category. Case-insensitive (ILIKE)."
+                }
+              ]
+            },
+            "description": "Daftar goals terbaru lebih dulu, lengkap dengan `meta` paginasi. Baris yang sudah di-soft-delete tidak ikut muncul."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test(\"data berupa array\", () => pm.expect(body.data).to.be.an(\"array\"));",
+                  "pm.test(\"ada meta paginasi\", () => {",
+                  "    pm.expect(body.meta).to.have.property(\"total_pages\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "List goals — pencarian",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals?search=BELAJAR&page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals"],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "BELAJAR",
+                  "description": "Sengaja huruf besar semua untuk membuktikan pencarian case-insensitive."
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Jalankan \"Create goals — JSON\" lebih dulu. Keyword huruf besar tetap menemukan title \"Belajar Clean Architecture\" karena query memakai ILIKE, bukan LIKE. Pencarian dicocokkan ke kolom title dan category."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"pencarian case-insensitive bekerja\", () => {",
+                  "    pm.expect(pm.response.json().data.length).to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get goals by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals", "{{goalsId}}"]
+            },
+            "description": "Memakai `goalsId` yang disimpan otomatis oleh request Create goals."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"id sesuai goalsId\", () => {",
+                  "    const dikirim = String(pm.collectionVariables.get(\"goalsId\"));",
+                  "    pm.expect(String(pm.response.json().data.id)).to.eql(dikirim);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update goals — sebagian field (JSON)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"progress\": \"80%\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals", "{{goalsId}}"]
+            },
+            "description": "Hanya field yang dikirim yang berubah. Field yang tidak dikirim tetap memakai nilai lama, karena DTO-nya memakai pointer."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"progress berubah\", () => pm.expect(hasil.progress).to.eql(\"80%\"));",
+                  "pm.test(\"title tidak ikut berubah\", () => {",
+                  "    pm.expect(hasil.title).to.eql(\"Belajar Clean Architecture\");",
+                  "});",
+                  "pm.test(\"updated_at lebih baru dari created_at\", () => {",
+                  "    pm.expect(new Date(hasil.updated_at) > new Date(hasil.created_at)).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update goals — status & priority",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"selesai\",\n  \"priority\": \"rendah\",\n  \"progress\": \"100%\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals", "{{goalsId}}"]
+            },
+            "description": "Nilai status dan priority belum dibatasi daftar tertentu di server — baru dibatasi panjang maksimal 100 karakter."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"tiga field terupdate\", () => {",
+                  "    pm.expect(hasil.status).to.eql(\"selesai\");",
+                  "    pm.expect(hasil.priority).to.eql(\"rendah\");",
+                  "    pm.expect(hasil.progress).to.eql(\"100%\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update goals — title kosong ditolak (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"   \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals", "{{goalsId}}"]
+            },
+            "description": "Ini yang dijaga oleh pointer di UpdateGoalsRequest: field yang TIDAK dikirim memakai nilai lama, tapi field yang dikirim kosong ditolak oleh usecase. Sengaja diletakkan sebelum Delete goals supaya goalsId masih menunjuk baris yang aktif."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error menunjuk field title\", () => {",
+                  "    pm.expect(pm.response.json().errors).to.have.property(\"title\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Delete goals",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals", "{{goalsId}}"]
+            },
+            "description": "Soft delete: barisnya hanya ditandai `deleted_at` di database, bukan dibuang. Setelah ini request Get goals by ID akan membalas 404."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"response sukses\", () => pm.expect(pm.response.json().success).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Contoh error",
+      "description": "Request yang sengaja dibuat gagal, untuk melihat bentuk response error dan mapping status code-nya: validasi 400, tidak ditemukan 404, no_task bentrok 409.",
+      "item": [
+        {
+          "name": "409 — no_task duplikat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"no_task\": \"TASK-001\",\n  \"judul\": \"Nomor task yang sudah dipakai\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks"]
+            },
+            "description": "Jalankan \"Create task (tanpa file) — JSON\" lebih dulu supaya TASK-001 sudah ada."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"success false\", () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "400 — judul terlalu pendek",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"judul\": \"ab\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks"]
+            },
+            "description": "Minimal 3 karakter. Pesan error dikembalikan per field di dalam `errors`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error menunjuk field judul\", () => {",
+                  "    pm.expect(pm.response.json().errors).to.have.property(\"judul\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "400 — ekstensi file tidak diizinkan",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "judul",
+                  "value": "Upload file terlarang",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Pilih file dengan ekstensi di luar ALLOWED_EXT, misalnya .txt atau .exe."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks"]
+            },
+            "description": "Daftar ekstensi yang diizinkan diatur lewat ALLOWED_EXT di .env, dan ikut dikembalikan di pesan error."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error menunjuk field file\", () => {",
+                  "    pm.expect(pm.response.json().errors).to.have.property(\"file\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "404 — task tidak ditemukan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks/999999",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks", "999999"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "400 — id bukan angka",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks/abc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "tasks", "abc"]
+            },
+            "description": "Divalidasi di handler sebelum menyentuh usecase maupun database."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error menunjuk field id\", () => {",
+                  "    pm.expect(pm.response.json().errors).to.have.property(\"id\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "400 — title goals terlalu pendek",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"ab\",\n  \"category\": \"belajar\",\n  \"priority\": \"tinggi\",\n  \"status\": \"berjalan\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals"]
+            },
+            "description": "Divalidasi oleh tag `validate` di DTO sebelum menyentuh usecase."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error menunjuk field title\", () => {",
+                  "    pm.expect(pm.response.json().errors).to.have.property(\"title\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "400 — field goals wajib tidak dikirim",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Judul yang cukup panjang\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals"]
+            },
+            "description": "category, priority, dan status wajib diisi. Response memuat ketiga pesan error sekaligus, bukan satu per satu."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"tiga field wajib dilaporkan sekaligus\", () => {",
+                  "    const errors = pm.response.json().errors;",
+                  "    pm.expect(errors).to.have.property(\"category\");",
+                  "    pm.expect(errors).to.have.property(\"priority\");",
+                  "    pm.expect(errors).to.have.property(\"status\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "404 — goals tidak ditemukan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/goals/999999",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "goals", "999999"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}
