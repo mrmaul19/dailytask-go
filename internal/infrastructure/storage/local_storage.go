@@ -1,6 +1,3 @@
-// Package storage adalah adapter penyimpanan file ke disk lokal.
-// Untuk pindah ke S3/MinIO, cukup buat adapter baru yang memenuhi
-// interface domain/storage.FileStorage tanpa menyentuh usecase.
 package storage
 
 import (
@@ -55,7 +52,6 @@ func (s *localStorage) Save(ctx context.Context, upload domainstorage.Upload) (*
 		})
 	}
 
-	// Nama di disk diacak agar tidak bentrok & tidak bisa dipakai path traversal.
 	storedName, err := randomName(ext)
 	if err != nil {
 		return nil, apperror.Internal("gagal membuat nama file", err)
@@ -90,9 +86,6 @@ func (s *localStorage) Save(ctx context.Context, upload domainstorage.Upload) (*
 	}, nil
 }
 
-// Open membuka file untuk di-stream ke client. Dibuka manual (bukan lewat
-// fiber Static/SendFile) supaya tidak ada file handle yang ditahan cache —
-// di Windows handle yang tertahan membuat os.Remove gagal.
 func (s *localStorage) Open(ctx context.Context, path string) (*domainstorage.Content, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, apperror.Internal("permintaan dibatalkan", err)
@@ -126,14 +119,12 @@ func (s *localStorage) Delete(ctx context.Context, path string) error {
 		return err
 	}
 	if err := os.Remove(safePath); err != nil && !os.IsNotExist(err) {
-		// Dilaporkan, bukan didiamkan: kalau gagal, file menjadi sampah di disk.
 		log.Printf("[WARN] gagal menghapus file %q: %v", safePath, err)
 		return apperror.Internal("gagal menghapus file", err)
 	}
 	return nil
 }
 
-// resolve memastikan path yang diminta benar-benar berada di dalam baseDir.
 func (s *localStorage) resolve(path string) (string, error) {
 	base, err := filepath.Abs(s.baseDir)
 	if err != nil {

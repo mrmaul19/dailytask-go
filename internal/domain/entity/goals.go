@@ -7,7 +7,6 @@ import (
 
 var ErrGoalsNotFound = errors.New("goals tidak ditemukan")
 
-// Goals merepresentasikan satu goal milik user.
 type Goals struct {
 	ID        uint
 	Title     string

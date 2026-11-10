@@ -1,5 +1,3 @@
-// Package usecase berisi aturan bisnis aplikasi.
-// Hanya bergantung pada domain (entity + port), tidak pada fiber/gorm.
 package usecase
 
 import (
@@ -17,8 +15,6 @@ import (
 	"daily-task-go/internal/domain/storage"
 	"daily-task-go/pkg/apperror"
 )
-
-// ---------- Input / Output (bentuk data antar-layer, bebas dari HTTP) ----------
 
 type CreateTaskInput struct {
 	NoTask      string
@@ -41,8 +37,6 @@ type ListTaskInput struct {
 	Limit  int
 }
 
-// DownloadOutput dipakai saat client mengunduh lampiran task.
-// Content wajib ditutup oleh pemanggil.
 type DownloadOutput struct {
 	FileName string
 	Size     int64
@@ -55,8 +49,6 @@ type ListTaskOutput struct {
 	Page  int
 	Limit int
 }
-
-// ---------- Kontrak usecase ----------
 
 type TaskUsecase interface {
 	Create(ctx context.Context, in CreateTaskInput) (*entity.Task, error)
@@ -72,8 +64,6 @@ type taskUsecase struct {
 	files    storage.FileStorage
 }
 
-// NewTaskUsecase menerima port lewat constructor (dependency injection),
-// sehingga mudah diganti mock saat testing.
 func NewTaskUsecase(taskRepo repository.TaskRepository, files storage.FileStorage) TaskUsecase {
 	return &taskUsecase{taskRepo: taskRepo, files: files}
 }
@@ -104,7 +94,6 @@ func (u *taskUsecase) Create(ctx context.Context, in CreateTaskInput) (*entity.T
 		Description: strings.TrimSpace(in.Description),
 	}
 
-	// Simpan file dulu; kalau insert DB gagal, file dibersihkan kembali.
 	var storedPath string
 	if in.File != nil {
 		stored, err := u.files.Save(ctx, *in.File)
@@ -196,14 +185,11 @@ func (u *taskUsecase) Update(ctx context.Context, id uint, in UpdateTaskInput) (
 	}
 
 	if err := u.taskRepo.Update(ctx, task); err != nil {
-		// rollback file baru supaya tidak jadi sampah
 		if task.FilePath != oldPath && task.HasFile() {
 			_ = u.files.Delete(ctx, task.FilePath)
 		}
 		return nil, apperror.Internal("gagal memperbarui task", err)
 	}
-
-	// file lama baru dihapus setelah DB sukses
 	if oldPath != "" && oldPath != task.FilePath {
 		_ = u.files.Delete(ctx, oldPath)
 	}
@@ -227,7 +213,6 @@ func (u *taskUsecase) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
-// ensureNoTaskAvailable menjaga invariant: no_task harus unik.
 func (u *taskUsecase) ensureNoTaskAvailable(ctx context.Context, noTask string, exceptID uint) error {
 	existing, err := u.taskRepo.FindByNoTask(ctx, noTask)
 	if err != nil {
@@ -266,7 +251,6 @@ func generateNoTask() (string, error) {
 	), nil
 }
 
-// Download mengambil lampiran sebuah task dari penyimpanan.
 func (u *taskUsecase) Download(ctx context.Context, id uint) (*DownloadOutput, error) {
 	task, err := u.GetByID(ctx, id)
 	if err != nil {

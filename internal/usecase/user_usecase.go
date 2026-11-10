@@ -12,25 +12,18 @@ import (
 	"daily-task-go/pkg/apperror"
 )
 
-// ---------- Input / Output (bentuk data antar-layer, bebas dari HTTP) ----------
-
 type CreateUserInput struct {
-	Email string
-	// Password berisi password POLOS dari client. Di-hash di usecase ini,
-	// dan tidak pernah disimpan maupun dikembalikan dalam bentuk aslinya.
+	Email    string
 	Password string
 	Name     string
 	Address  string
 	Job      string
 	Status   string
-	// Role boleh kosong — diisi entity.RoleUser. Default yang aman adalah
-	// yang paling sedikit haknya.
-	Role string
+	Role     string
 }
 
 type UpdateUserInput struct {
-	Email *string
-	// Password polos. nil = jangan ganti password.
+	Email    *string
 	Password *string
 	Name     *string
 	Address  *string
@@ -52,8 +45,6 @@ type ListUserOutput struct {
 	Limit int
 }
 
-// ---------- Kontrak usecase ----------
-
 type UserUsecase interface {
 	Create(ctx context.Context, in CreateUserInput) (*entity.User, error)
 	List(ctx context.Context, in ListUserInput) (*ListUserOutput, error)
@@ -67,8 +58,6 @@ type userUsecase struct {
 	hasher   security.PasswordHasher
 }
 
-// NewUserUsecase menerima port lewat constructor (dependency injection),
-// sehingga mudah diganti mock saat testing.
 func NewUserUsecase(userRepo repository.UserRepository, hasher security.PasswordHasher) UserUsecase {
 	return &userUsecase{userRepo: userRepo, hasher: hasher}
 }
@@ -138,8 +127,6 @@ func (u *userUsecase) Update(ctx context.Context, id uint, in UpdateUserInput) (
 		return nil, err
 	}
 
-	// Pointer dipakai supaya "field tidak dikirim" (biarkan nilai lama)
-	// bisa dibedakan dari "field dikirim kosong" (ditolak).
 	fields := []struct {
 		name  string
 		input *string
@@ -163,7 +150,6 @@ func (u *userUsecase) Update(ctx context.Context, id uint, in UpdateUserInput) (
 		*f.dest = value
 	}
 
-	// Email diperlakukan terpisah karena perlu normalisasi + cek keunikan.
 	if in.Email != nil {
 		email := entity.NormalizeEmail(*in.Email)
 		if email == "" {
@@ -176,7 +162,6 @@ func (u *userUsecase) Update(ctx context.Context, id uint, in UpdateUserInput) (
 		user.Email = email
 	}
 
-	// Role terpisah karena nilainya terbatas, bukan teks bebas.
 	if in.Role != nil {
 		role, err := normalizeRole(*in.Role)
 		if err != nil {
@@ -185,8 +170,6 @@ func (u *userUsecase) Update(ctx context.Context, id uint, in UpdateUserInput) (
 		user.Role = role
 	}
 
-	// Password terpisah karena harus di-hash, dan sengaja TIDAK di-TrimSpace:
-	// spasi di awal/akhir adalah bagian sah dari sebuah password.
 	if in.Password != nil {
 		hashed, err := u.hashPassword(*in.Password)
 		if err != nil {
@@ -215,13 +198,6 @@ func (u *userUsecase) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
-// ensureEmailAvailable menjaga invariant: email harus unik.
-// exceptID dipakai saat update, supaya user tidak dianggap bentrok dengan
-// dirinya sendiri ketika mengirim email yang sama dengan miliknya sekarang.
-//
-// Pemeriksaan di sini bukan jaminan mutlak — dua request bersamaan masih bisa
-// lolos keduanya. Penjaga terakhirnya adalah unique index di database
-// (users_email_unique_idx); yang kedua lolos akan gagal di repository.
 func (u *userUsecase) ensureEmailAvailable(ctx context.Context, email string, exceptID uint) error {
 	existing, err := u.userRepo.FindByEmail(ctx, email)
 	if err != nil {
@@ -236,11 +212,6 @@ func (u *userUsecase) ensureEmailAvailable(ctx context.Context, email string, ex
 	return apperror.Conflict(fmt.Sprintf("email %q sudah digunakan", email))
 }
 
-// normalizeRole memberi nilai bawaan yang aman dan menolak nilai asing.
-//
-// Role kosong menjadi entity.RoleUser — bukan admin. Kalau suatu saat ada
-// jalur yang lupa mengisi role, kegagalannya berupa "haknya terlalu sedikit",
-// bukan "siapa pun jadi admin".
 func normalizeRole(raw string) (string, error) {
 	role := strings.ToLower(strings.TrimSpace(raw))
 	if role == "" {
@@ -253,8 +224,6 @@ func normalizeRole(raw string) (string, error) {
 	return role, nil
 }
 
-// hashPassword membungkus port hasher supaya kegagalannya menjadi apperror
-// yang seragam. Pesan errornya sengaja tidak memuat password apa pun.
 func (u *userUsecase) hashPassword(plain string) (string, error) {
 	if plain == "" {
 		return "", apperror.Validation("data tidak valid",

@@ -11,11 +11,6 @@ import (
 	"daily-task-go/internal/domain/repository"
 )
 
-// goalsColumns dipakai bersama oleh seluruh SELECT/RETURNING di file ini
-// supaya urutan kolomnya selalu sama dengan urutan Scan di scanGoals.
-//
-// Tanpa COALESCE seperti di tabel tasks, karena tabel goals dibuat langsung
-// oleh migrasi dengan seluruh kolom teks NOT NULL.
 const goalsColumns = `id, title, category, priority, status, progress, created_at, updated_at`
 
 type goalsRepositorySQL struct {
@@ -57,7 +52,7 @@ func (r *goalsRepositorySQL) Create(ctx context.Context, goals *entity.Goals) er
 	if err != nil {
 		return err
 	}
-	*goals = *created // balikkan ID & timestamp hasil insert
+	*goals = *created
 	return nil
 }
 
@@ -67,13 +62,11 @@ func (r *goalsRepositorySQL) FindAll(ctx context.Context, filter repository.Goal
 
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		args = append(args, "%"+search+"%")
-		// Satu keyword dipakai untuk dua kolom, jadi nomor parameternya sama.
 		conditions = append(conditions, fmt.Sprintf(
 			"(title ILIKE $%d OR category ILIKE $%d)", len(args), len(args)))
 	}
 	where := " WHERE " + strings.Join(conditions, " AND ")
 
-	// Hitung total dulu dengan kondisi yang sama, untuk metadata pagination.
 	var total int64
 	if err := r.db.QueryRowContext(ctx,
 		`SELECT count(*) FROM goals`+where, args...).Scan(&total); err != nil {
@@ -90,8 +83,6 @@ func (r *goalsRepositorySQL) FindAll(ctx context.Context, filter repository.Goal
 	}
 	defer rows.Close()
 
-	// Kapasitas dibatasi supaya Limit yang tidak wajar tidak langsung
-	// mengalokasikan slice raksasa.
 	list := make([]entity.Goals, 0, min(max(filter.Limit, 0), 100))
 	for rows.Next() {
 		goals, err := scanGoals(rows)
@@ -100,7 +91,6 @@ func (r *goalsRepositorySQL) FindAll(ctx context.Context, filter repository.Goal
 		}
 		list = append(list, *goals)
 	}
-	// Wajib: error saat iterasi (koneksi putus, dsb) hanya muncul di sini.
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -121,8 +111,6 @@ func (r *goalsRepositorySQL) FindByID(ctx context.Context, id uint) (*entity.Goa
 	return goals, nil
 }
 
-// Update menimpa kolom yang boleh diubah, lalu mengembalikan baris hasilnya
-// lewat RETURNING -- jadi UpdatedAt ikut ter-refresh tanpa query tambahan.
 func (r *goalsRepositorySQL) Update(ctx context.Context, goals *entity.Goals) error {
 	const query = `
 		UPDATE goals SET
@@ -140,7 +128,6 @@ func (r *goalsRepositorySQL) Update(ctx context.Context, goals *entity.Goals) er
 
 	updated, err := scanGoals(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Tidak ada baris yang cocok: id-nya tidak ada atau sudah dihapus.
 		return entity.ErrGoalsNotFound
 	}
 	if err != nil {
@@ -150,7 +137,6 @@ func (r *goalsRepositorySQL) Update(ctx context.Context, goals *entity.Goals) er
 	return nil
 }
 
-// Delete adalah soft delete: barisnya hanya ditandai, bukan dibuang.
 func (r *goalsRepositorySQL) Delete(ctx context.Context, id uint) error {
 	const query = `UPDATE goals SET deleted_at = now() WHERE id = $1 AND ` + notDeleted
 

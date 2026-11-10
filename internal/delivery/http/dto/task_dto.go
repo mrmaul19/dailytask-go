@@ -1,5 +1,3 @@
-// Package dto adalah bentuk data khusus HTTP (request body & response JSON).
-// Entity domain tidak pernah dikirim langsung ke client.
 package dto
 
 import (

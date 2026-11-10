@@ -1,5 +1,3 @@
-// Package database bertanggung jawab membuka koneksi ke Postgres
-// dan menjalankan migrasi skema.
 package database
 
 import (
@@ -8,16 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	// Driver "pgx" untuk database/sql. Diimpor hanya demi efek samping
-	// registrasi driver-nya; querynya tetap ditulis manual sebagai SQL.
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"daily-task-go/config"
 )
 
-// New membuka koneksi Postgres dan memastikan koneksinya benar-benar hidup
-// lewat ping, bukan hanya "berhasil dibuat". sql.Open sendiri bersifat lazy:
-// ia tidak menyentuh server sampai query pertama dijalankan.
 func New(cfg *config.Config) (*sql.DB, error) {
 	db, err := sql.Open("pgx", cfg.Database.DSN())
 	if err != nil {

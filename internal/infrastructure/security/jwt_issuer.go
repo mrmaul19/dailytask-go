@@ -10,14 +10,8 @@ import (
 	domainsecurity "daily-task-go/internal/domain/security"
 )
 
-// signingMethod dikunci ke satu algoritma, dan Parse hanya menerima algoritma
-// ini. Tanpa pembatasan tersebut, token bisa dipalsukan lewat "alg confusion":
-// penyerang mengirim token ber-alg "none", atau menandatangani dengan HMAC
-// memakai public key sebagai kunci saat server mengira dirinya memakai RSA.
 var signingMethod = jwt.SigningMethodHS256
 
-// jwtClaims adalah bentuk claim di dalam token.
-// Subject (sub) dipakai untuk id user karena itu claim standar JWT.
 type jwtClaims struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
@@ -29,10 +23,6 @@ type jwtIssuer struct {
 	ttl    time.Duration
 }
 
-// NewJWTIssuer membuat penerbit token JWT.
-//
-// Pemeriksaan kelayakan secret dilakukan di composition root (main.go), supaya
-// aplikasi berhenti saat start — bukan saat login pertama kali dicoba.
 func NewJWTIssuer(secret string, ttl time.Duration) domainsecurity.TokenIssuer {
 	return &jwtIssuer{secret: []byte(secret), ttl: ttl}
 }
@@ -64,13 +54,10 @@ func (i *jwtIssuer) Parse(raw string) (*domainsecurity.Claims, error) {
 
 	_, err := jwt.ParseWithClaims(raw, &claims,
 		func(*jwt.Token) (any, error) { return i.secret, nil },
-		// Hanya algoritma yang kita pakai sendiri yang diterima.
 		jwt.WithValidMethods([]string{signingMethod.Alg()}),
-		// Kedaluwarsa wajib ada; token tanpa exp ditolak, bukan dianggap abadi.
 		jwt.WithExpirationRequired(),
 	)
 	if err != nil {
-		// Alasan detailnya sengaja tidak diteruskan ke pemanggil.
 		return nil, domainsecurity.ErrTokenTidakValid
 	}
 

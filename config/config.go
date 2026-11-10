@@ -1,5 +1,3 @@
-// Package config memuat seluruh konfigurasi aplikasi dari environment variable.
-// Tidak ada paket lain yang boleh memanggil os.Getenv secara langsung.
 package config
 
 import (
@@ -15,12 +13,10 @@ import (
 )
 
 type App struct {
-	Name    string
-	Port    string
-	Env     string
-	BaseURL string
-	// EnableDocs menyalakan UI Swagger di /swagger/index.html.
-	// Matikan (ENABLE_DOCS=false) kalau tidak ingin spec API terbuka di publik.
+	Name       string
+	Port       string
+	Env        string
+	BaseURL    string
 	EnableDocs bool
 }
 
@@ -41,23 +37,12 @@ type Storage struct {
 }
 
 type Auth struct {
-	// JWTSecret menandatangani token. Siapa pun yang tahu nilai ini bisa
-	// membuat token atas nama user mana pun, jadi nilainya wajib diganti
-	// di luar development. main.go menolak start kalau masih memakai
-	// DefaultJWTSecret saat APP_ENV=production.
-	JWTSecret string
-	// JWTTTL adalah umur token. Token yang sudah terbit tidak bisa ditarik
-	// kembali, jadi makin pendek makin kecil dampaknya kalau bocor.
-	JWTTTL time.Duration
-	// RateLimitMax dan RateLimitWindow membatasi percobaan di /auth/*.
-	// Nilai bawaan 10 per menit: cukup longgar untuk orang yang salah ketik
-	// beberapa kali, cukup ketat untuk menghentikan penebakan massal.
+	JWTSecret       string
+	JWTTTL          time.Duration
 	RateLimitMax    int
 	RateLimitWindow time.Duration
 }
 
-// DefaultJWTSecret hanya untuk development, supaya aplikasi bisa langsung
-// dijalankan setelah clone tanpa menyiapkan apa pun.
 const DefaultJWTSecret = "dev-secret-wajib-diganti-di-production"
 
 type Config struct {
@@ -67,7 +52,6 @@ type Config struct {
 	Auth     Auth
 }
 
-// Load membaca file .env (kalau ada) lalu environment variable.
 func Load() *Config {
 	_ = godotenv.Load()
 
@@ -102,9 +86,6 @@ func Load() *Config {
 	}
 }
 
-// DSN merakit connection string Postgres dalam bentuk URL.
-// Dirakit lewat net/url supaya karakter khusus pada password (@, /, :, spasi)
-// ikut di-escape dan tidak merusak connection string.
 func (d Database) DSN() string {
 	u := url.URL{
 		Scheme: "postgres",
@@ -116,8 +97,6 @@ func (d Database) DSN() string {
 	q := url.Values{}
 	q.Set("sslmode", d.SSLMode)
 	if d.TimeZone != "" {
-		// Dikirim sebagai runtime parameter ke server Postgres, jadi now()
-		// dan kolom timestamptz memakai zona waktu ini.
 		q.Set("timezone", d.TimeZone)
 	}
 	u.RawQuery = q.Encode()
@@ -125,7 +104,6 @@ func (d Database) DSN() string {
 	return u.String()
 }
 
-// MaskedDSN aman untuk ditulis ke log: password disembunyikan.
 func (d Database) MaskedDSN() string {
 	return fmt.Sprintf("postgres://%s:***@%s:%s/%s?sslmode=%s",
 		d.User, d.Host, d.Port, d.Name, d.SSLMode)
@@ -140,7 +118,6 @@ func env(key, fallback string) string {
 	return fallback
 }
 
-// envDuration membaca durasi bergaya Go: "30m", "24h", "168h".
 func envDuration(key string, fallback time.Duration) time.Duration {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {

@@ -1,5 +1,3 @@
-// Package repository mendefinisikan kontrak (port) akses data.
-// Implementasinya berada di internal/infrastructure/persistence.
 package repository
 
 import (
@@ -8,9 +6,8 @@ import (
 	"daily-task-go/internal/domain/entity"
 )
 
-// TaskFilter adalah kriteria pencarian untuk FindAll.
 type TaskFilter struct {
-	Search string // dicocokkan ke no_task / judul / description
+	Search string
 	Page   int
 	Limit  int
 }

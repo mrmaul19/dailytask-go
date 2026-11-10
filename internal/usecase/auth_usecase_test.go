@@ -13,11 +13,6 @@ import (
 	"daily-task-go/pkg/apperror"
 )
 
-// ---------- fake token issuer ----------
-
-// fakeTokenIssuer menghindari JWT asli di unit test: yang diuji di lapisan ini
-// adalah "apakah token diterbitkan untuk user yang benar", bukan benar-tidaknya
-// tanda tangan kriptografis — itu urusan adapter infrastructure.
 type fakeTokenIssuer struct {
 	issued []security.Claims
 	err    error
@@ -37,8 +32,6 @@ func (f *fakeTokenIssuer) Issue(claims security.Claims) (security.Token, error) 
 func (f *fakeTokenIssuer) Parse(string) (*security.Claims, error) {
 	return nil, security.ErrTokenTidakValid
 }
-
-// ---------- helper ----------
 
 func setupAuth() (usecase.AuthUsecase, *fakeUserRepo, *fakeTokenIssuer, *fakeHasher) {
 	repo := newFakeUserRepo()
@@ -63,8 +56,6 @@ func registerContoh(t *testing.T, uc usecase.AuthUsecase) *usecase.AuthOutput {
 	return out
 }
 
-// ---------- register ----------
-
 func TestAuthRegister_MengembalikanTokenDanUser(t *testing.T) {
 	uc, _, tokens, _ := setupAuth()
 
@@ -88,17 +79,11 @@ func TestAuthRegister_StatusDipaksaAktif(t *testing.T) {
 	uc, _, _, _ := setupAuth()
 
 	out := registerContoh(t, uc)
-
-	// RegisterInput memang tidak punya field Status — test ini mengunci
-	// perilakunya supaya tidak ada yang diam-diam menambahkannya nanti.
 	if out.User.Status != "aktif" {
 		t.Errorf("status = %q, ingin %q", out.User.Status, "aktif")
 	}
 }
 
-// Pendaftar tidak boleh bisa menjadikan dirinya admin. RegisterInput memang
-// tidak punya field Role — test ini mengunci perilakunya supaya tidak ada
-// yang diam-diam menambahkannya nanti.
 func TestAuthRegister_RoleDipaksaUserBiasa(t *testing.T) {
 	uc, _, tokens, _ := setupAuth()
 
@@ -120,8 +105,6 @@ func TestAuthLogin_RoleIkutMasukToken(t *testing.T) {
 	ctx := context.Background()
 
 	terdaftar := registerContoh(t, uc)
-
-	// Promosikan jadi admin langsung di repo, meniru UPDATE manual di database.
 	promoted := repo.users[terdaftar.User.ID]
 	promoted.Role = entity.RoleAdmin
 	repo.users[promoted.ID] = promoted
@@ -155,7 +138,7 @@ func TestAuthRegister_EmailDuplikatDitolak(t *testing.T) {
 	registerContoh(t, uc)
 
 	_, err := uc.Register(context.Background(), usecase.RegisterInput{
-		Email:    "BUDI@MAIL.COM", // beda huruf besar-kecil, tetap orang yang sama
+		Email:    "BUDI@MAIL.COM",
 		Password: "rahasia123",
 		Name:     "Budi Kembar",
 		Address:  "Jl. Lain 2",
@@ -168,8 +151,6 @@ func TestAuthRegister_EmailDuplikatDitolak(t *testing.T) {
 		t.Errorf("kind = %s, ingin %s", got, apperror.KindConflict)
 	}
 }
-
-// ---------- login ----------
 
 func TestAuthLogin_KredensialBenar(t *testing.T) {
 	uc, _, tokens, _ := setupAuth()
@@ -222,10 +203,6 @@ func TestAuthLogin_PasswordSalah(t *testing.T) {
 	}
 }
 
-// Test paling penting di berkas ini: email tak dikenal dan password salah
-// harus menghasilkan respons yang TIDAK bisa dibedakan. Kalau yang satu 404
-// dan yang lain 401, endpoint login berubah jadi alat untuk memeriksa
-// email mana saja yang punya akun.
 func TestAuthLogin_EmailTidakDikenalTidakBisaDibedakanDariPasswordSalah(t *testing.T) {
 	uc, _, _, _ := setupAuth()
 	ctx := context.Background()
@@ -253,9 +230,6 @@ func TestAuthLogin_EmailTidakDikenalTidakBisaDibedakanDariPasswordSalah(t *testi
 	}
 }
 
-// Saat email tidak ditemukan, usecase tetap harus menjalankan satu verifikasi
-// ke hash dummy. Tanpa itu, request untuk email yang tidak terdaftar dibalas
-// jauh lebih cepat, dan selisih waktunya membocorkan keberadaan akun.
 func TestAuthLogin_EmailTidakDikenalTetapMenjalankanVerify(t *testing.T) {
 	uc, _, _, hasher := setupAuth()
 

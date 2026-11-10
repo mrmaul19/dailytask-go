@@ -16,8 +16,6 @@ import (
 	"daily-task-go/pkg/apperror"
 )
 
-// ---------- fake repository (in-memory, tanpa database) ----------
-
 type fakeTaskRepo struct {
 	tasks  map[uint]entity.Task
 	lastID uint
@@ -78,8 +76,6 @@ func (r *fakeTaskRepo) Delete(_ context.Context, id uint) error {
 	return nil
 }
 
-// ---------- fake storage (in-memory, tanpa disk) ----------
-
 type fakeStorage struct {
 	files map[string][]byte
 	seq   int
@@ -113,8 +109,6 @@ func (s *fakeStorage) Delete(_ context.Context, path string) error {
 	return nil
 }
 
-// ---------- helper ----------
-
 func setup() (usecase.TaskUsecase, *fakeTaskRepo, *fakeStorage) {
 	repo := newFakeTaskRepo()
 	files := newFakeStorage()
@@ -137,8 +131,6 @@ func kindOf(t *testing.T, err error) apperror.Kind {
 	}
 	return appErr.Kind
 }
-
-// ---------- test ----------
 
 func TestCreate_NoTaskDigenerateOtomatis(t *testing.T) {
 	uc, _, _ := setup()

@@ -11,8 +11,6 @@ import (
 	"daily-task-go/pkg/apperror"
 )
 
-// ---------- fake repository (in-memory, tanpa database) ----------
-
 type fakeGoalsRepo struct {
 	goals  map[uint]entity.Goals
 	lastID uint
@@ -63,8 +61,6 @@ func (r *fakeGoalsRepo) Delete(_ context.Context, id uint) error {
 	return nil
 }
 
-// ---------- helper ----------
-
 func setupGoals() (usecase.GoalsUsecase, *fakeGoalsRepo) {
 	repo := newFakeGoalsRepo()
 	return usecase.NewGoalsUsecase(repo), repo
@@ -86,8 +82,6 @@ func seedGoals(t *testing.T, uc usecase.GoalsUsecase) *entity.Goals {
 }
 
 func ptr(s string) *string { return &s }
-
-// ---------- test ----------
 
 func TestGoalsCreate_MenyimpanDanMengisiID(t *testing.T) {
 	uc, repo := setupGoals()

@@ -12,23 +12,8 @@ import (
 	"daily-task-go/pkg/apperror"
 )
 
-// pesanKredensialSalah sengaja SATU pesan untuk dua sebab berbeda:
-// email tidak terdaftar, dan password salah.
-//
-// Kalau dibedakan, endpoint login berubah fungsi menjadi alat pemeriksa
-// "email ini punya akun atau tidak" — siapa pun bisa memetakan daftar
-// pengguna tanpa perlu menebak satu password pun.
 const pesanKredensialSalah = "email atau password salah"
 
-// ---------- Input / Output ----------
-
-// RegisterInput sengaja TIDAK punya Status maupun Role.
-//
-// Role terutama: kalau field itu ada di sini, siapa pun cukup mengirim
-// "role":"admin" saat mendaftar untuk mendapat hak penuh. Keduanya dipaksa
-// oleh server di bawah. Bandingkan dengan CreateUserInput yang dipakai
-// endpoint pengelolaan user — di sana keduanya memang boleh ditentukan,
-// karena endpoint itu sendiri sudah dibatasi untuk admin.
 type RegisterInput struct {
 	Email    string
 	Password string
@@ -55,13 +40,10 @@ type AuthUsecase interface {
 }
 
 type authUsecase struct {
-	users    UserUsecase
-	userRepo repository.UserRepository
-	hasher   security.PasswordHasher
-	tokens   security.TokenIssuer
-
-	// dummyHash dipakai untuk meratakan waktu respons saat email tidak
-	// ditemukan. Lihat penjelasan di Login.
+	users     UserUsecase
+	userRepo  repository.UserRepository
+	hasher    security.PasswordHasher
+	tokens    security.TokenIssuer
 	dummyHash string
 }
 
@@ -80,9 +62,6 @@ func NewAuthUsecase(
 	}
 }
 
-// Register memakai ulang UserUsecase.Create, bukan menulis ulang alurnya.
-// Dengan begitu normalisasi email, pemeriksaan email unik, dan hashing
-// password hanya hidup di satu tempat.
 func (a *authUsecase) Register(ctx context.Context, in RegisterInput) (*AuthOutput, error) {
 	user, err := a.users.Create(ctx, CreateUserInput{
 		Email:    in.Email,
@@ -90,12 +69,10 @@ func (a *authUsecase) Register(ctx context.Context, in RegisterInput) (*AuthOutp
 		Name:     in.Name,
 		Address:  in.Address,
 		Job:      in.Job,
-		// Keduanya dipaksa server, tidak pernah datang dari request.
-		Status: entity.StatusAktif,
-		Role:   entity.RoleUser,
+		Status:   entity.StatusAktif,
+		Role:     entity.RoleUser,
 	})
 	if err != nil {
-		// Termasuk apperror.Conflict kalau email sudah dipakai -> 409.
 		return nil, err
 	}
 
@@ -108,12 +85,6 @@ func (a *authUsecase) Login(ctx context.Context, in LoginInput) (*AuthOutput, er
 	user, err := a.userRepo.FindByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, entity.ErrUserNotFound) {
-			// Tetap jalankan satu verifikasi ke hash palsu sebelum menolak.
-			//
-			// Tanpa ini, email yang tidak terdaftar dibalas seketika, sedangkan
-			// email terdaftar harus menunggu bcrypt yang sengaja lambat.
-			// Selisih waktunya konsisten dan bisa diukur dari luar, sehingga
-			// keberadaan sebuah akun tetap bocor walau pesan errornya sama.
 			_ = a.hasher.Verify(a.dummyHash, in.Password)
 			return nil, apperror.Unauthorized(pesanKredensialSalah)
 		}
@@ -121,9 +92,6 @@ func (a *authUsecase) Login(ctx context.Context, in LoginInput) (*AuthOutput, er
 	}
 
 	if err := a.hasher.Verify(user.Password, in.Password); err != nil {
-		// Sebab aslinya tidak diteruskan: password salah dan hash rusak
-		// (misalnya baris user lama yang password-nya masih kosong)
-		// harus terlihat sama dari luar.
 		return nil, apperror.Unauthorized(pesanKredensialSalah)
 	}
 
@@ -142,9 +110,6 @@ func (a *authUsecase) terbitkanToken(user *entity.User) (*AuthOutput, error) {
 	return &AuthOutput{User: user, Token: token}, nil
 }
 
-// buatDummyHash menghasilkan satu hash dari nilai acak saat aplikasi start.
-// Nilainya tidak pernah cocok dengan password mana pun, dan dibuat lewat port
-// hasher supaya usecase tetap tidak tahu-menahu soal bcrypt.
 func buatDummyHash(hasher security.PasswordHasher) string {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {

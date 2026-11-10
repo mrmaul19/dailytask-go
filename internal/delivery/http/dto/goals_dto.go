@@ -14,8 +14,6 @@ type CreateGoalsRequest struct {
 	Progress string `form:"progress" json:"progress" validate:"omitempty,max=100"`
 }
 
-// UpdateGoalsRequest memakai pointer agar bisa membedakan "field tidak dikirim"
-// (pakai nilai lama) dari "field dikirim kosong" (error validasi).
 type UpdateGoalsRequest struct {
 	Title    *string `form:"title" json:"title" validate:"omitempty,min=3,max=255"`
 	Category *string `form:"category" json:"category" validate:"omitempty,max=100"`

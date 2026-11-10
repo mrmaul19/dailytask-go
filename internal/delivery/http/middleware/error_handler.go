@@ -1,4 +1,3 @@
-// Package middleware berisi lintas-concern HTTP.
 package middleware
 
 import (
@@ -12,11 +11,8 @@ import (
 	"daily-task-go/pkg/response"
 )
 
-// ErrorHandler adalah satu-satunya tempat error diterjemahkan ke HTTP status.
-// Handler cukup `return err`, tidak perlu menulis status code di mana-mana.
 func ErrorHandler(debug bool) fiber.ErrorHandler {
 	return func(c *fiber.Ctx, err error) error {
-		// error bawaan fiber (route tidak ada, body terlalu besar, dst.)
 		var fiberErr *fiber.Error
 		if errors.As(err, &fiberErr) {
 			return response.Error(c, fiberErr.Code, fiberErr.Message, nil)

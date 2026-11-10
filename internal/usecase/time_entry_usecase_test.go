@@ -11,14 +11,9 @@ import (
 	"daily-task-go/pkg/apperror"
 )
 
-// ---------- fake repository (in-memory, tanpa database) ----------
-
 type fakeTimeEntryRepo struct {
-	entries map[uint]entity.TimeEntry
-	lastID  uint
-	// tolakCreateKarenaIndexUnik mensimulasikan jalur balapan: pemeriksaan
-	// FindRunningByUserID di usecase lolos, tetapi index unik di database
-	// tetap menolak karena ada request lain yang menyelip di antaranya.
+	entries                    map[uint]entity.TimeEntry
+	lastID                     uint
 	tolakCreateKarenaIndexUnik bool
 }
 
@@ -30,7 +25,6 @@ func (r *fakeTimeEntryRepo) Create(_ context.Context, entry *entity.TimeEntry) e
 	if r.tolakCreateKarenaIndexUnik {
 		return entity.ErrTimerSedangBerjalan
 	}
-	// Meniru index unik time_entries_one_running_per_user.
 	for _, e := range r.entries {
 		if e.UserID == entry.UserID && e.EndedAt == nil {
 			return entity.ErrTimerSedangBerjalan
@@ -57,7 +51,6 @@ func (r *fakeTimeEntryRepo) FindAll(_ context.Context, filter repository.TimeEnt
 		if filter.From != nil && e.StartedAt.Before(*filter.From) {
 			continue
 		}
-		// Batas atas eksklusif, sama dengan "started_at < $n" di SQL-nya.
 		if filter.To != nil && !e.StartedAt.Before(*filter.To) {
 			continue
 		}
@@ -88,7 +81,6 @@ func (r *fakeTimeEntryRepo) Update(_ context.Context, entry *entity.TimeEntry) e
 	if _, ok := r.entries[entry.ID]; !ok {
 		return entity.ErrTimeEntryNotFound
 	}
-	// Meniru CHECK constraint time_entries_interval_check.
 	if entry.EndedAt != nil && !entry.EndedAt.After(entry.StartedAt) {
 		return entity.ErrRentangWaktuTidakValid
 	}
@@ -102,8 +94,6 @@ func (r *fakeTimeEntryRepo) Delete(_ context.Context, id uint) error {
 	if _, ok := r.entries[id]; !ok {
 		return entity.ErrTimeEntryNotFound
 	}
-	// Soft delete di SQL; di sini cukup dibuang, karena yang diuji adalah
-	// perilaku usecase: setelah dihapus, barisnya tidak terbaca lagi.
 	delete(r.entries, id)
 	return nil
 }
@@ -115,8 +105,6 @@ const (
 	userLain    = uint(8)
 )
 
-// setupTimeEntry menyiapkan usecase beserta satu task yang sudah ada,
-// karena Start selalu memeriksa keberadaan task lebih dulu.
 func setupTimeEntry(t *testing.T) (usecase.TimeEntryUsecase, *fakeTimeEntryRepo, uint) {
 	t.Helper()
 
@@ -143,13 +131,6 @@ func mulaiTimer(t *testing.T, uc usecase.TimeEntryUsecase, userID, taskID uint) 
 	return entry
 }
 
-// mulaiTimerSatuJamLalu memulai timer lalu memundurkan started_at-nya.
-//
-// Perlu karena time.Now() di Windows beresolusi sekitar 0,5 ms: Start dan Stop
-// yang dipanggil beruntun di dalam test hampir selalu jatuh pada nilai jam yang
-// sama persis, sehingga durasinya nol dan ditolak aturan "selesai harus setelah
-// mulai". Dengan memundurkan started_at, yang diuji adalah perilaku Stop --
-// bukan resolusi jam sistem.
 func mulaiTimerSatuJamLalu(t *testing.T, uc usecase.TimeEntryUsecase, userID, taskID uint) *entity.TimeEntry {
 	t.Helper()
 
@@ -163,8 +144,6 @@ func mulaiTimerSatuJamLalu(t *testing.T, uc usecase.TimeEntryUsecase, userID, ta
 }
 
 func ptrTime(v time.Time) *time.Time { return &v }
-
-// ---------- Start ----------
 
 func TestTimeEntryStart_MenyimpanDanMengisiID(t *testing.T) {
 	uc, repo, taskID := setupTimeEntry(t)
@@ -227,13 +206,11 @@ func TestTimeEntryStart_TaskTidakDitemukan(t *testing.T) {
 	if err == nil {
 		t.Fatal("task yang tidak ada seharusnya ditolak")
 	}
-	// 404, bukan 500: ini kesalahan input biasa, bukan kegagalan sistem.
 	if got := kindOf(t, err); got != apperror.KindNotFound {
 		t.Errorf("kind = %s, ingin %s", got, apperror.KindNotFound)
 	}
 }
 
-// Batas "satu timer berjalan" berlaku per user, bukan global.
 func TestTimeEntryStart_TimerTerpisahPerUser(t *testing.T) {
 	uc, _, taskID := setupTimeEntry(t)
 	mulaiTimer(t, uc, userPemilik, taskID)
@@ -246,9 +223,6 @@ func TestTimeEntryStart_TimerTerpisahPerUser(t *testing.T) {
 	}
 }
 
-// Pemeriksaan FindRunningByUserID punya celah balapan; yang benar-benar
-// menutupnya adalah index unik di database. Errornya harus sampai ke pemanggil
-// sebagai 409, bukan 500.
 func TestTimeEntryStart_BalapanDenganIndexUnikJadiKonflik(t *testing.T) {
 	uc, repo, taskID := setupTimeEntry(t)
 	repo.tolakCreateKarenaIndexUnik = true
@@ -264,8 +238,6 @@ func TestTimeEntryStart_BalapanDenganIndexUnikJadiKonflik(t *testing.T) {
 		t.Errorf("kind = %s, ingin %s", got, apperror.KindConflict)
 	}
 }
-
-// ---------- Stop ----------
 
 func TestTimeEntryStop_MenutupTimerDanMengisiNote(t *testing.T) {
 	uc, _, taskID := setupTimeEntry(t)
@@ -288,7 +260,7 @@ func TestTimeEntryStop_MenutupTimerDanMengisiNote(t *testing.T) {
 
 func TestTimeEntryStop_NoteTidakDikirimTidakBerubah(t *testing.T) {
 	uc, _, taskID := setupTimeEntry(t)
-	mulaiTimerSatuJamLalu(t, uc, userPemilik, taskID) // note awal: "ngoding"
+	mulaiTimerSatuJamLalu(t, uc, userPemilik, taskID)
 
 	stopped, err := uc.Stop(context.Background(), usecase.StopTimerInput{UserID: userPemilik})
 	if err != nil {
@@ -306,8 +278,6 @@ func TestTimeEntryStop_TanpaTimerBerjalanDitolak(t *testing.T) {
 	if err == nil {
 		t.Fatal("stop tanpa timer berjalan seharusnya ditolak")
 	}
-	// 409, bukan 404: yang tidak ada bukan sebuah resource, melainkan
-	// keadaan yang disyaratkan permintaan ini.
 	if got := kindOf(t, err); got != apperror.KindConflict {
 		t.Errorf("kind = %s, ingin %s", got, apperror.KindConflict)
 	}
@@ -326,7 +296,6 @@ func TestTimeEntryStop_HanyaMenutupTimerMilikPemanggil(t *testing.T) {
 		t.Errorf("id yang dihentikan = %d, ingin %d", stopped.ID, milikPemilik.ID)
 	}
 
-	// Timer user lain harus tetap berjalan.
 	lain, err := uc.Running(context.Background(), userLain)
 	if err != nil {
 		t.Fatalf("tidak mengharapkan error: %v", err)
@@ -335,8 +304,6 @@ func TestTimeEntryStop_HanyaMenutupTimerMilikPemanggil(t *testing.T) {
 		t.Error("timer user lain seharusnya tidak ikut berhenti")
 	}
 }
-
-// ---------- Running ----------
 
 func TestTimeEntryRunning_MengembalikanTimerYangBerjalan(t *testing.T) {
 	uc, _, taskID := setupTimeEntry(t)
@@ -354,8 +321,6 @@ func TestTimeEntryRunning_MengembalikanTimerYangBerjalan(t *testing.T) {
 	}
 }
 
-// Tidak ada timer berjalan bukan kegagalan -- itu jawaban yang sah, dan
-// halaman yang baru dibuka akan sering berada dalam keadaan ini.
 func TestTimeEntryRunning_TidakAdaTimerBukanError(t *testing.T) {
 	uc, _, _ := setupTimeEntry(t)
 
@@ -367,8 +332,6 @@ func TestTimeEntryRunning_TidakAdaTimerBukanError(t *testing.T) {
 		t.Errorf("entry = %v, ingin nil", running)
 	}
 }
-
-// ---------- GetByID / kepemilikan ----------
 
 func TestTimeEntryGetByID_MilikUserLainDianggapTidakAda(t *testing.T) {
 	uc, _, taskID := setupTimeEntry(t)
@@ -382,8 +345,6 @@ func TestTimeEntryGetByID_MilikUserLainDianggapTidakAda(t *testing.T) {
 	if err == nil {
 		t.Fatal("entry milik orang lain seharusnya tidak bisa dibaca")
 	}
-	// 404, bukan 403: 403 memberi tahu bahwa id itu ada, cukup untuk
-	// memetakan catatan waktu siapa saja dengan mencoba angka satu per satu.
 	if got := kindOf(t, err); got != apperror.KindNotFound {
 		t.Errorf("kind = %s, ingin %s", got, apperror.KindNotFound)
 	}
@@ -401,10 +362,6 @@ func TestTimeEntryGetByID_TidakDitemukan(t *testing.T) {
 	}
 }
 
-// ---------- Update ----------
-
-// Kasus paling sering di fitur semacam ini: lupa menekan Stop, lalu
-// durasinya perlu dibetulkan.
 func TestTimeEntryUpdate_KoreksiLupaStop(t *testing.T) {
 	uc, _, taskID := setupTimeEntry(t)
 	entry := mulaiTimer(t, uc, userPemilik, taskID)
@@ -425,7 +382,7 @@ func TestTimeEntryUpdate_KoreksiLupaStop(t *testing.T) {
 
 func TestTimeEntryUpdate_HanyaFieldYangDikirimYangBerubah(t *testing.T) {
 	uc, _, taskID := setupTimeEntry(t)
-	entry := mulaiTimer(t, uc, userPemilik, taskID) // note awal: "ngoding"
+	entry := mulaiTimer(t, uc, userPemilik, taskID)
 	mulaiSemula := entry.StartedAt
 
 	updated, err := uc.Update(context.Background(), userPemilik, entry.ID,
@@ -575,8 +532,6 @@ func TestTimeEntryList_MenyaringPerTask(t *testing.T) {
 	}
 }
 
-// ---------- Delete ----------
-
 func TestTimeEntryDelete_MenghapusDariRepo(t *testing.T) {
 	uc, repo, taskID := setupTimeEntry(t)
 	entry := mulaiTimer(t, uc, userPemilik, taskID)
@@ -613,8 +568,6 @@ func TestTimeEntryDelete_MilikUserLainDitolak(t *testing.T) {
 	}
 }
 
-// Setelah timer yang berjalan dihapus, user bisa memulai timer baru --
-// index unik mengecualikan baris yang sudah di-soft-delete.
 func TestTimeEntryDelete_TimerBerjalanDihapusMembebaskanSlot(t *testing.T) {
 	uc, _, taskID := setupTimeEntry(t)
 	entry := mulaiTimer(t, uc, userPemilik, taskID)

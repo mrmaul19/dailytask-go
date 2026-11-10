@@ -11,8 +11,6 @@ import (
 	"daily-task-go/pkg/apperror"
 )
 
-// ---------- Input / Output (bentuk data antar-layer, bebas dari HTTP) ----------
-
 type CreateGoalsInput struct {
 	Title    string
 	Category string
@@ -42,8 +40,6 @@ type ListGoalsOutput struct {
 	Limit int
 }
 
-// ---------- Kontrak usecase ----------
-
 type GoalsUsecase interface {
 	Create(ctx context.Context, in CreateGoalsInput) (*entity.Goals, error)
 	List(ctx context.Context, in ListGoalsInput) (*ListGoalsOutput, error)
@@ -56,8 +52,6 @@ type goalsUsecase struct {
 	goalsRepo repository.GoalsRepository
 }
 
-// NewGoalsUsecase menerima port lewat constructor (dependency injection),
-// sehingga mudah diganti mock saat testing.
 func NewGoalsUsecase(goalsRepo repository.GoalsRepository) GoalsUsecase {
 	return &goalsUsecase{goalsRepo: goalsRepo}
 }
@@ -109,9 +103,6 @@ func (u *goalsUsecase) Update(ctx context.Context, id uint, in UpdateGoalsInput)
 	if err != nil {
 		return nil, err
 	}
-
-	// Pointer dipakai supaya "field tidak dikirim" (biarkan nilai lama)
-	// bisa dibedakan dari "field dikirim kosong" (ditolak).
 	fields := []struct {
 		name  string
 		input *string

@@ -12,8 +12,6 @@ import (
 	"daily-task-go/pkg/apperror"
 )
 
-// ---------- fake repository (in-memory, tanpa database) ----------
-
 type fakeUserRepo struct {
 	users  map[uint]entity.User
 	lastID uint
@@ -74,11 +72,6 @@ func (r *fakeUserRepo) Delete(_ context.Context, id uint) error {
 	return nil
 }
 
-// ---------- fake hasher ----------
-
-// fakeHasher sengaja tidak memakai bcrypt: bcrypt dibuat lambat dengan sengaja,
-// dan kalau dipakai di sini setiap test ikut lambat. Yang diuji di lapisan ini
-// adalah "apakah usecase benar-benar meng-hash", bukan kekuatan algoritmanya.
 var errPasswordTidakCocok = errors.New("password tidak cocok")
 
 type fakeHasher struct {
@@ -98,8 +91,6 @@ func (h *fakeHasher) Verify(hash, plain string) error {
 	}
 	return nil
 }
-
-// ---------- helper ----------
 
 func setupUser() (usecase.UserUsecase, *fakeUserRepo) {
 	repo := newFakeUserRepo()
@@ -121,8 +112,6 @@ func seedUser(t *testing.T, uc usecase.UserUsecase) *entity.User {
 	}
 	return user
 }
-
-// ---------- test ----------
 
 func TestUserCreate_MenyimpanDanMengisiID(t *testing.T) {
 	uc, repo := setupUser()
@@ -198,9 +187,8 @@ func TestUserCreate_EmailDinormalisasiKeHurufKecil(t *testing.T) {
 func TestUserCreate_EmailDuplikatDitolak(t *testing.T) {
 	uc, _ := setupUser()
 
-	seedUser(t, uc) // memakai budi@mail.com
+	seedUser(t, uc)
 
-	// Beda besar-kecil huruf harus tetap dianggap email yang sama.
 	_, err := uc.Create(context.Background(), usecase.CreateUserInput{
 		Email:    "BUDI@MAIL.COM",
 		Password: "rahasia123",
@@ -237,7 +225,7 @@ func TestUserUpdate_EmailMilikUserLainDitolak(t *testing.T) {
 	uc, _ := setupUser()
 	ctx := context.Background()
 
-	pertama := seedUser(t, uc) // budi@mail.com
+	pertama := seedUser(t, uc)
 	kedua, err := uc.Create(ctx, usecase.CreateUserInput{
 		Email:    "siti@mail.com",
 		Password: "rahasia123",
@@ -297,8 +285,6 @@ func TestUserUpdate_PasswordBaruIkutDiHash(t *testing.T) {
 
 func TestUserCreate_RoleKosongJadiUserBiasa(t *testing.T) {
 	uc, _ := setupUser()
-
-	// seedUser tidak mengirim Role sama sekali.
 	user := seedUser(t, uc)
 
 	if user.Role != entity.RoleUser {

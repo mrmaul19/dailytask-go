@@ -6,9 +6,8 @@ import (
 	"daily-task-go/internal/domain/entity"
 )
 
-// GoalsFilter adalah kriteria pencarian untuk FindAll.
 type GoalsFilter struct {
-	Search string // dicocokkan ke title / category
+	Search string
 	Page   int
 	Limit  int
 }

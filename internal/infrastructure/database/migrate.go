@@ -11,20 +11,12 @@ import (
 	"daily-task-go/migrations"
 )
 
-// schemaMigrationsDDL mencatat file migrasi mana yang sudah dijalankan,
-// supaya migrasi yang sama tidak diterapkan dua kali.
 const schemaMigrationsDDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
 	version    TEXT        PRIMARY KEY,
 	applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 )`
 
-// Migrate menjalankan file .sql di paket migrations yang belum pernah
-// dijalankan, urut berdasarkan nama file.
-//
-// Setiap file dieksekusi dalam satu transaksi bersama pencatatan versinya,
-// jadi migrasi yang gagal di tengah tidak meninggalkan skema setengah jadi
-// maupun catatan versi yang bohong.
 func Migrate(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, schemaMigrationsDDL); err != nil {
 		return fmt.Errorf("gagal menyiapkan tabel schema_migrations: %w", err)
@@ -86,7 +78,6 @@ func applyMigration(ctx context.Context, db *sql.DB, name, body string) error {
 	if err != nil {
 		return fmt.Errorf("gagal membuka transaksi untuk migrasi %s: %w", name, err)
 	}
-	// Tidak ada efek apa pun kalau Commit di bawah sudah berhasil.
 	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(ctx, body); err != nil {

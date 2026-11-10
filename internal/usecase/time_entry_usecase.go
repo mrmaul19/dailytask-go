@@ -12,8 +12,6 @@ import (
 	"daily-task-go/pkg/apperror"
 )
 
-// ---------- Input / Output (bentuk data antar-layer, bebas dari HTTP) ----------
-
 type StartTimerInput struct {
 	UserID uint
 	TaskID uint
@@ -47,8 +45,6 @@ type ListTimeEntryOutput struct {
 	Page    int
 	Limit   int
 }
-
-// ---------- Kontrak usecase ----------
 
 type TimeEntryUsecase interface {
 	Start(ctx context.Context, in StartTimerInput) (*entity.TimeEntry, error)
