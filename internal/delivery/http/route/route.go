@@ -12,10 +12,11 @@ import (
 )
 
 type Deps struct {
-	TaskHandler  *handler.TaskHandler
-	GoalsHandler *handler.GoalsHandler
-	UserHandler  *handler.UserHandler
-	AuthHandler  *handler.AuthHandler
+	TaskHandler      *handler.TaskHandler
+	GoalsHandler     *handler.GoalsHandler
+	UserHandler      *handler.UserHandler
+	AuthHandler      *handler.AuthHandler
+	TimeEntryHandler *handler.TimeEntryHandler
 
 	// AuthMiddleware sudah jadi fiber.Handler, bukan port TokenIssuer.
 	// Dengan begitu paket route tidak perlu tahu-menahu soal JWT — ia hanya
@@ -69,6 +70,28 @@ func Register(app *fiber.App, deps Deps) {
 	goals.Get("/:id", deps.GoalsHandler.GetByID)
 	goals.Put("/:id", deps.GoalsHandler.Update)
 	goals.Delete("/:id", deps.GoalsHandler.Delete)
+
+	// Catatan waktu. AuthMiddleware WAJIB di sini: setiap endpoint di grup ini
+	// bersandar pada identitas pemanggil (user_id diambil dari token, bukan
+	// dari body/query). Tanpa middleware-nya, handler menolak dengan 401 —
+	// gagal ke arah yang aman, tapi tetap salah pasang.
+	//
+	// Berbeda dari /tasks dan /goals yang saat ini terbuka, grup ini memang
+	// tidak bisa terbuka: "catatan waktu saya" tidak punya arti tanpa "saya".
+	timeEntries := v1.Group("/time-entries", deps.AuthMiddleware)
+
+	// URUTAN PENTING: /start, /stop, dan /running didaftarkan SEBELUM /:id.
+	// Fiber mencocokkan rute sesuai urutan pendaftaran, jadi kalau /:id lebih
+	// dulu, "running" akan dibaca sebagai nilai :id lalu ditolak 400 oleh
+	// parseID — kegagalan yang membingungkan karena rutenya sendiri ada.
+	timeEntries.Post("/start", deps.TimeEntryHandler.Start)
+	timeEntries.Post("/stop", deps.TimeEntryHandler.Stop)
+	timeEntries.Get("/running", deps.TimeEntryHandler.Running)
+
+	timeEntries.Get("/", deps.TimeEntryHandler.List)
+	timeEntries.Get("/:id", deps.TimeEntryHandler.GetByID)
+	timeEntries.Put("/:id", deps.TimeEntryHandler.Update)
+	timeEntries.Delete("/:id", deps.TimeEntryHandler.Delete)
 
 	// Pengelolaan user butuh token DAN role admin. Urutannya penting:
 	// AuthMiddleware mengisi role, AdminMiddleware membacanya.

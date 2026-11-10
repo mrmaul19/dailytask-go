@@ -83,6 +83,34 @@ type GoalsListEnvelope struct {
 	Meta    response.Meta   `json:"meta"`
 }
 
+// ---------- time entries ----------
+
+// TimeEntryEnvelope adalah response satu catatan waktu.
+type TimeEntryEnvelope struct {
+	Success bool              `json:"success" example:"true"`
+	Message string            `json:"message" example:"timer berhasil dimulai"`
+	Data    TimeEntryResponse `json:"data"`
+}
+
+// RunningTimeEntryEnvelope adalah response GET /time-entries/running.
+//
+// `data` sengaja bertipe pointer: tidak ada timer yang berjalan adalah jawaban
+// yang sah, dan dibalas 200 dengan `data: null` — bukan 404.
+type RunningTimeEntryEnvelope struct {
+	Success bool               `json:"success" example:"true"`
+	Message string             `json:"message" example:"tidak ada timer yang sedang berjalan"`
+	Data    *TimeEntryResponse `json:"data"`
+}
+
+// TimeEntryListEnvelope adalah response daftar catatan waktu beserta
+// metadata paginasi.
+type TimeEntryListEnvelope struct {
+	Success bool                `json:"success" example:"true"`
+	Message string              `json:"message" example:"daftar catatan waktu berhasil diambil"`
+	Data    []TimeEntryResponse `json:"data"`
+	Meta    response.Meta       `json:"meta"`
+}
+
 // ---------- users ----------
 
 // UserEnvelope adalah response satu user.

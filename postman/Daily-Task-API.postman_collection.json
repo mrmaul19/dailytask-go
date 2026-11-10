@@ -1,13 +1,48 @@
 {
   "info": {
     "name": "Daily Task API (Go Fiber + Clean Architecture)",
-    "description": "Mini project daily task (tasks + goals). Backend Go Fiber + database/sql (pgx), tanpa ORM.\n\nCara pakai:\n1. Jalankan API: `go run ./cmd/api`\n2. Pilih environment \"Daily Task API - Local\", atau biarkan pakai variable koleksi `baseUrl`.\n3. Jalankan request berurutan dari atas. Request \"Create task\" dan \"Create goals\" otomatis menyimpan `taskId` / `goalsId`, jadi request Detail/Update/Download/Delete langsung terpakai tanpa ketik ID manual.\n\nUntuk request yang mengirim file, klik kolom `file` di tab Body > form-data lalu pilih file dari komputer Anda (Postman tidak bisa menyimpan path file di dalam koleksi).",
+    "description": "Mini project daily task (tasks + goals + users + time tracking). Backend Go Fiber + database/sql (pgx), tanpa ORM, dengan autentikasi JWT dan role.\n\nCara pakai:\n1. Jalankan API: `go run ./cmd/api` (default http://localhost:3000 — sesuaikan `baseUrl` kalau APP_PORT diubah).\n2. Pilih environment \"Daily Task API - Local\", atau biarkan pakai variable koleksi.\n3. Jalankan request berurutan dari atas.\n\nAutentikasi:\n- Koleksi ini memakai Bearer Token di level koleksi dengan nilai `{{token}}`, jadi semua request mewarisinya tanpa perlu set header manual. Folder \"Auth\" sengaja di-set No Auth.\n- \"Login — ambil token (admin)\" menyimpan `token`. \"Register\" dan \"Login — akun hasil register\" menyimpan `userToken` (role user), yang dipakai contoh error 403.\n\nAdmin pertama tidak bisa lahir dari endpoint mana pun: `/auth/register` selalu membuat role `user`, dan `/api/v1/users` sendiri sudah butuh token admin. Jadi promosikan sekali lewat SQL:\n\n    UPDATE users SET role = 'admin' WHERE email = 'admin@contoh.com';\n\nAlur yang disarankan: Register -> promosikan lewat SQL -> isi `authEmail`/`authPassword` -> Login (admin) -> folder Users siap dipakai.\n\nCatatan: grup `/api/v1/tasks` dan `/api/v1/goals` saat ini BELUM dilindungi token (lihat route.go). Yang butuh token: `/api/v1/time-entries` (role apa pun) dan `/api/v1/users` (wajib role admin).\n\nFolder \"Time Tracking\" berdiri sendiri: ia membuat task bantuannya sendiri, memakainya, lalu membersihkannya — jadi bisa di-Run sendirian dan bisa diulang berkali-kali. Cukup pakai token role user; tidak perlu admin.\n\nUntuk request yang mengirim file, klik kolom `file` di tab Body > form-data lalu pilih file dari komputer Anda (Postman tidak bisa menyimpan path file di dalam koleksi).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:8080",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "authEmail",
+      "value": "admin@contoh.com",
+      "type": "string"
+    },
+    {
+      "key": "authPassword",
+      "value": "rahasia123",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "registeredEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "managedEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
       "type": "string"
     },
     {
@@ -17,6 +52,41 @@
     },
     {
       "key": "goalsId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "timeEntryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "timerTaskId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "timerNoTask",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "timerFrom",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "timerTo",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "timerStartedAt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "timerEndedAt",
       "value": "",
       "type": "string"
     }
@@ -29,8 +99,12 @@
         "header": [],
         "url": {
           "raw": "{{baseUrl}}/health",
-          "host": ["{{baseUrl}}"],
-          "path": ["health"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
         },
         "description": "Cek service hidup. Kalau gagal connect, pastikan `go run ./cmd/api` sudah jalan dan Postgres aktif."
       },
@@ -51,8 +125,191 @@
       "response": []
     },
     {
+      "name": "Auth",
+      "description": "Register & login — satu-satunya grup yang bisa diakses tanpa token. Ber-rate-limit (default 10 request per menit per IP, lihat AUTH_RATE_LIMIT_MAX).",
+      "auth": {
+        "type": "noauth"
+      },
+      "item": [
+        {
+          "name": "Register — akun baru",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{registeredEmail}}\",\n  \"password\": \"rahasia123\",\n  \"name\": \"Budi Santoso\",\n  \"address\": \"Jl. Merdeka 10, Bandung\",\n  \"job\": \"Backend Developer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Pendaftaran mandiri. Status (`aktif`) dan role (`user`) dipaksa server — tidak bisa dikirim dari sini.\n\nPre-request script mengisi `registeredEmail` dengan email ber-timestamp supaya request ini bisa dijalankan berulang tanpa kena 409.\n\nToken yang dikembalikan disimpan ke `userToken`, bukan `token`, karena akun hasil register selalu role `user` dan akan ditolak 403 di folder Users."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Email ber-timestamp supaya request ini tetap bisa dijalankan berulang.",
+                  "pm.collectionVariables.set(\"registeredEmail\", \"budi+\" + Date.now() + \"@contoh.com\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"mengembalikan token\", () => {",
+                  "    pm.expect(hasil.token).to.be.a(\"string\").and.not.empty;",
+                  "});",
+                  "pm.test(\"role dipaksa 'user' dan status 'aktif'\", () => {",
+                  "    pm.expect(hasil.user.role).to.eql(\"user\");",
+                  "    pm.expect(hasil.user.status).to.eql(\"aktif\");",
+                  "});",
+                  "pm.test(\"password tidak ikut terkirim\", () => {",
+                  "    pm.expect(hasil.user).to.not.have.property(\"password\");",
+                  "});",
+                  "pm.collectionVariables.set(\"userToken\", hasil.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login — ambil token (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{authEmail}}\",\n  \"password\": \"{{authPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Menyimpan hasilnya ke `token`, yang dipakai seluruh koleksi lewat auth di level koleksi.\n\nAkun ini harus sudah dipromosikan jadi admin lewat SQL, kalau tidak folder Users balas 403:\n\n    UPDATE users SET role = 'admin' WHERE email = 'admin@contoh.com';\n\nUmur token default 24 jam (JWT_TTL)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"mengembalikan token dan expires_at\", () => {",
+                  "    pm.expect(hasil.token).to.be.a(\"string\").and.not.empty;",
+                  "    pm.expect(hasil.expires_at).to.be.a(\"string\");",
+                  "});",
+                  "pm.collectionVariables.set(\"token\", hasil.token);",
+                  "",
+                  "// Peringatan dini: token non-admin membuat seluruh folder Users balas 403.",
+                  "if (hasil.user && hasil.user.role !== \"admin\") {",
+                  "    console.warn(\"Akun ini role '\" + hasil.user.role + \"'. Promosikan dulu lewat SQL supaya folder Users bisa dipakai.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login — akun hasil register (role user)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{registeredEmail}}\",\n  \"password\": \"rahasia123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Login memakai akun dari request Register di atas. Hasilnya disimpan ke `userToken`, yang dipakai contoh error 403 di folder \"Contoh error\"."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"role tetap 'user'\", () => pm.expect(hasil.user.role).to.eql(\"user\"));",
+                  "pm.collectionVariables.set(\"userToken\", hasil.token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Tasks",
-      "description": "CRUD daily task.",
+      "description": "CRUD daily task.\n\nCatatan: grup ini BELUM dilindungi token (lihat route.go) — bisa dipanggil tanpa header Authorization.",
       "item": [
         {
           "name": "Create task (dengan file) — multipart",
@@ -91,8 +348,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks"
+              ]
             },
             "description": "Buat task baru beserta lampiran. Jangan set header Content-Type manual — Postman mengisinya sendiri lengkap dengan boundary."
           },
@@ -140,8 +403,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks"
+              ]
             },
             "description": "Endpoint yang sama juga menerima JSON kalau tidak ada file yang diupload."
           },
@@ -168,8 +437,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks?page=1&limit=10",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks"
+              ],
               "query": [
                 {
                   "key": "page",
@@ -217,8 +492,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks?search=POSTGRES&page=1&limit=10",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks"
+              ],
               "query": [
                 {
                   "key": "search",
@@ -260,8 +541,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks", "{{taskId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks",
+                "{{taskId}}"
+              ]
             },
             "description": "`taskId` terisi otomatis setelah menjalankan \"Create task (dengan file)\"."
           },
@@ -288,8 +576,16 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}/download",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks", "{{taskId}}", "download"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks",
+                "{{taskId}}",
+                "download"
+              ]
             },
             "description": "Isi `file_url` pada response task mengarah ke endpoint ini. File diambil berdasarkan data di database, jadi nama file di disk (yang diacak) tidak pernah terekspos. Pakai Send > Send and Download untuk menyimpan hasilnya."
           },
@@ -330,8 +626,15 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks", "{{taskId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks",
+                "{{taskId}}"
+              ]
             },
             "description": "Field yang tidak dikirim tetap memakai nilai lama. Coba hapus `judul` dan kirim `description` saja — judul tidak akan berubah."
           },
@@ -377,8 +680,15 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks", "{{taskId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks",
+                "{{taskId}}"
+              ]
             },
             "description": "Cek folder `uploads/` sebelum dan sesudah request ini — jumlah filenya tetap satu, tidak menumpuk."
           },
@@ -419,8 +729,15 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks", "{{taskId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks",
+                "{{taskId}}"
+              ]
             },
             "description": "Melepas lampiran tanpa menghapus task. File fisiknya ikut dihapus dari folder upload."
           },
@@ -447,8 +764,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks/{{taskId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks", "{{taskId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks",
+                "{{taskId}}"
+              ]
             },
             "description": "Menghapus task beserta lampirannya di disk."
           },
@@ -470,7 +794,7 @@
     },
     {
       "name": "Goals",
-      "description": "CRUD goals. JSON murni — goals tidak punya lampiran file.",
+      "description": "CRUD goals. JSON murni — goals tidak punya lampiran file.\n\nCatatan: grup ini BELUM dilindungi token (lihat route.go) — bisa dipanggil tanpa header Authorization.",
       "item": [
         {
           "name": "Create goals — JSON",
@@ -493,8 +817,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals"
+              ]
             },
             "description": "Buat goals baru. Field wajib: title (3-255), category, priority, status (maksimal 100 karakter). Field progress opsional."
           },
@@ -530,8 +860,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals?page=1&limit=10",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals"
+              ],
               "query": [
                 {
                   "key": "page",
@@ -579,8 +915,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals?search=BELAJAR&page=1&limit=10",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals"
+              ],
               "query": [
                 {
                   "key": "search",
@@ -622,8 +964,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals", "{{goalsId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals",
+                "{{goalsId}}"
+              ]
             },
             "description": "Memakai `goalsId` yang disimpan otomatis oleh request Create goals."
           },
@@ -665,8 +1014,15 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals", "{{goalsId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals",
+                "{{goalsId}}"
+              ]
             },
             "description": "Hanya field yang dikirim yang berubah. Field yang tidak dikirim tetap memakai nilai lama, karena DTO-nya memakai pointer."
           },
@@ -713,8 +1069,15 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals", "{{goalsId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals",
+                "{{goalsId}}"
+              ]
             },
             "description": "Nilai status dan priority belum dibatasi daftar tertentu di server — baru dibatasi panjang maksimal 100 karakter."
           },
@@ -759,8 +1122,15 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals", "{{goalsId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals",
+                "{{goalsId}}"
+              ]
             },
             "description": "Ini yang dijaga oleh pointer di UpdateGoalsRequest: field yang TIDAK dikirim memakai nilai lama, tapi field yang dikirim kosong ditolak oleh usecase. Sengaja diletakkan sebelum Delete goals supaya goalsId masih menunjuk baris yang aktif."
           },
@@ -787,8 +1157,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals/{{goalsId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals", "{{goalsId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals",
+                "{{goalsId}}"
+              ]
             },
             "description": "Soft delete: barisnya hanya ditandai `deleted_at` di database, bukan dibuang. Setelah ini request Get goals by ID akan membalas 404."
           },
@@ -809,9 +1186,1493 @@
       ]
     },
     {
-      "name": "Contoh error",
-      "description": "Request yang sengaja dibuat gagal, untuk melihat bentuk response error dan mapping status code-nya: validasi 400, tidak ditemukan 404, no_task bentrok 409.",
+      "name": "Time Tracking",
+      "description": "Pencatatan waktu pengerjaan task. Seluruh grup ini WAJIB pakai token — `user_id` diambil\ndari token, bukan dari body/query, jadi \"catatan waktu saya\" tidak punya arti tanpa \"saya\".\n\nUrutan request di folder ini sengaja dibuat sebagai satu alur utuh: ia membuat task bantuan\nsendiri, memakainya, lalu membersihkannya. Jadi folder ini bisa di-Run sendirian — asal\n`token` sudah terisi dari folder Auth.\n\nKalau \"Mulai timer\" langsung dijawab 409, berarti user ini masih punya timer yang berjalan\ndari percobaan sebelumnya. Jalankan \"Hentikan timer\" satu kali, lalu mulai folder dari atas.",
       "item": [
+        {
+          "name": "Siapkan task untuk timer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks"
+              ]
+            },
+            "description": "Timer selalu menempel pada sebuah task, jadi folder ini butuh satu task yang pasti ada.\n\n`no_task` dibuat ber-timestamp oleh pre-request script karena kolom itu unik — tanpa itu,\nmenjalankan folder ini dua kali akan kena 409 di request pertama.\n\nTask ini dihapus lagi oleh request terakhir folder ini.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"no_task\": \"{{timerNoTask}}\",\n  \"judul\": \"Task untuk uji time tracking\",\n  \"description\": \"dibuat otomatis oleh folder Time Tracking\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// no_task unik supaya folder ini bisa dijalankan berulang.",
+                  "pm.collectionVariables.set(\"timerNoTask\", \"TIMER-\" + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"id task terisi\", () => pm.expect(hasil.id).to.be.above(0));",
+                  "",
+                  "// Disimpan ke variabel sendiri, bukan taskId, supaya tidak menimpa task",
+                  "// yang dipakai folder Tasks.",
+                  "pm.collectionVariables.set(\"timerTaskId\", hasil.id);",
+                  "console.log(\"timerTaskId disimpan:\", hasil.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mulai timer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "start"
+              ]
+            },
+            "description": "Membuka catatan waktu baru: `started_at` diisi server, `ended_at` masih null.\n\nHanya `task_id` yang wajib. `note` opsional, maksimal 255 karakter.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": {{timerTaskId}},\n  \"note\": \"mulai ngerjain\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"id terisi\", () => pm.expect(hasil.id).to.be.above(0));",
+                  "pm.test(\"timer berstatus berjalan\", () => {",
+                  "    pm.expect(hasil.is_running).to.be.true;",
+                  "    pm.expect(hasil.ended_at).to.be.null;",
+                  "});",
+                  "pm.test(\"user_id diambil dari token, bukan dari body\", () => {",
+                  "    pm.expect(hasil.user_id).to.be.above(0);",
+                  "});",
+                  "pm.test(\"menempel pada task yang dikirim\", () => {",
+                  "    pm.expect(String(hasil.task_id)).to.eql(pm.collectionVariables.get(\"timerTaskId\").toString());",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set(\"timeEntryId\", hasil.id);",
+                  "console.log(\"timeEntryId disimpan:\", hasil.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mulai timer lagi — ditolak (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "start"
+              ]
+            },
+            "description": "Satu user hanya boleh punya satu timer berjalan. Aturan ini dijaga dua lapis:\nusecase memeriksanya lebih dulu supaya pesannya enak dibaca, dan partial unique index\n`time_entries_one_running_per_user` menjaganya di database kalau dua request datang\nbersamaan.\n\nJalankan \"Mulai timer\" lebih dulu supaya ada timer yang berjalan.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": {{timerTaskId}},\n  \"note\": \"percobaan kedua\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test(\"response gagal\", () => pm.expect(body.success).to.be.false);",
+                  "pm.test(\"pesannya menyebut timer yang masih berjalan\", () => {",
+                  "    pm.expect(body.message).to.include(\"masih ada timer yang berjalan\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Timer yang sedang berjalan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/running",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "running"
+              ]
+            },
+            "description": "Mengembalikan satu timer yang sedang berjalan milik pemanggil.\n\nRute ini didaftarkan sebelum `/:id` di route.go — kalau terbalik, \"running\" akan dibaca\nsebagai nilai `:id` lalu ditolak 400."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"ada timer yang berjalan\", () => pm.expect(hasil).to.not.be.null);",
+                  "pm.test(\"id-nya sama dengan yang baru dimulai\", () => {",
+                  "    pm.expect(String(hasil.id)).to.eql(pm.collectionVariables.get(\"timeEntryId\").toString());",
+                  "});",
+                  "pm.test(\"durasi ikut berjalan\", () => {",
+                  "    pm.expect(hasil.duration_seconds).to.be.at.least(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hentikan timer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "stop"
+              ]
+            },
+            "description": "Menutup timer yang sedang berjalan: `ended_at` diisi server.\n\nEndpoint ini tidak butuh id — yang dihentikan adalah satu-satunya timer berjalan milik\npemanggil. Body-nya pun opsional: kirim `note` kalau mau menimpa catatan, atau kirim\nbody kosong sama sekali.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"selesai sesi pertama\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"timer sudah berhenti\", () => {",
+                  "    pm.expect(hasil.is_running).to.be.false;",
+                  "    pm.expect(hasil.ended_at).to.not.be.null;",
+                  "});",
+                  "pm.test(\"note ikut diperbarui\", () => {",
+                  "    pm.expect(hasil.note).to.eql(\"selesai sesi pertama\");",
+                  "});",
+                  "pm.test(\"durasi tidak negatif\", () => {",
+                  "    pm.expect(hasil.duration_seconds).to.be.at.least(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hentikan timer lagi — ditolak (409)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "stop"
+              ]
+            },
+            "description": "409, bukan 404: permintaannya bisa dimengerti, hanya tidak ada yang bisa dihentikan.\n\nJalankan \"Hentikan timer\" lebih dulu supaya tidak ada lagi timer yang berjalan."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"pesannya jelas: tidak ada yang berjalan\", () => {",
+                  "    pm.expect(pm.response.json().message).to.eql(\"tidak ada timer yang sedang berjalan\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Timer yang sedang berjalan — kosong",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/running",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "running"
+              ]
+            },
+            "description": "Tidak ada timer yang berjalan adalah jawaban yang sah, jadi dibalas 200 dengan\n`data: null` — bukan 404. 404 akan memaksa klien memperlakukan keadaan normal\n(\"saya sedang tidak mencatat waktu\") sebagai error."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test(\"data null, bukan 404\", () => pm.expect(body.data).to.be.null);",
+                  "pm.test(\"tetap success: true\", () => pm.expect(body.success).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List catatan waktu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Default 1."
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Default 10, maksimal 100."
+                }
+              ]
+            },
+            "description": "Hanya catatan waktu milik pemanggil yang muncul. Terbaru lebih dulu\n(`ORDER BY started_at DESC`), lengkap dengan `meta` paginasi."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test(\"data berupa array\", () => pm.expect(body.data).to.be.an(\"array\"));",
+                  "pm.test(\"ada meta paginasi\", () => {",
+                  "    pm.expect(body.meta).to.have.property(\"total_pages\");",
+                  "});",
+                  "pm.test(\"semua baris milik pemanggil\", () => {",
+                  "    const pemilik = new Set(body.data.map(e => e.user_id));",
+                  "    pm.expect(pemilik.size).to.be.at.most(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List — saring per task & rentang waktu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries?task_id={{timerTaskId}}&from={{timerFrom}}&to={{timerTo}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries"
+              ],
+              "query": [
+                {
+                  "key": "task_id",
+                  "value": "{{timerTaskId}}",
+                  "description": "Saring per task."
+                },
+                {
+                  "key": "from",
+                  "value": "{{timerFrom}}",
+                  "description": "Batas bawah inklusif, format RFC3339."
+                },
+                {
+                  "key": "to",
+                  "value": "{{timerTo}}",
+                  "description": "Batas atas eksklusif, format RFC3339."
+                }
+              ]
+            },
+            "description": "`from` dan `to` memakai format RFC3339 dan disaring pada `started_at`:\nbatas bawah inklusif, batas atas eksklusif. Jadi rentang satu bulan penuh ditulis\ndari tanggal 1 bulan ini sampai tanggal 1 bulan berikutnya — tanpa menebak-nebak\napakah hari terakhir ikut terhitung.\n\nPre-request script mengisi rentangnya ±1 hari dari sekarang supaya request ini\nselalu relevan."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Rentang +-1 hari dari sekarang, supaya request ini tidak basi.",
+                  "const sekarang = Date.now();",
+                  "const sehari = 24 * 60 * 60 * 1000;",
+                  "pm.collectionVariables.set(\"timerFrom\", new Date(sekarang - sehari).toISOString());",
+                  "pm.collectionVariables.set(\"timerTo\", new Date(sekarang + sehari).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const diminta = pm.collectionVariables.get(\"timerTaskId\").toString();",
+                  "pm.test(\"ada hasilnya\", () => pm.expect(body.data.length).to.be.above(0));",
+                  "pm.test(\"semua baris dari task yang diminta\", () => {",
+                  "    body.data.forEach(e => pm.expect(String(e.task_id)).to.eql(diminta));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detail catatan waktu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/{{timeEntryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "{{timeEntryId}}"
+              ]
+            },
+            "description": "Catatan waktu milik user lain dijawab 404, bukan 403: membalas 403 berarti mengakui\nbahwa id itu ada — itu membocorkan keberadaan data orang lain."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"id sesuai yang diminta\", () => {",
+                  "    pm.expect(String(hasil.id)).to.eql(pm.collectionVariables.get(\"timeEntryId\").toString());",
+                  "});",
+                  "pm.test(\"durasi dihitung server\", () => {",
+                  "    pm.expect(hasil).to.have.property(\"duration_seconds\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Koreksi catatan waktu",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/{{timeEntryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "{{timeEntryId}}"
+              ]
+            },
+            "description": "Untuk memperbaiki catatan yang salah — lupa menekan start, atau lupa stop sampai\nbesok paginya. Semua field opsional: yang tidak dikirim dibiarkan apa adanya.\n\n`user_id` tidak bisa diubah dari sini.\n\nPre-request script mengisi rentang tepat 2 jam, jadi `duration_seconds` yang benar\nadalah 7200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"started_at\": \"{{timerStartedAt}}\",\n  \"ended_at\": \"{{timerEndedAt}}\",\n  \"note\": \"dikoreksi: lupa start timer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Rentang tepat 2 jam supaya durasinya bisa diuji dengan angka pasti.",
+                  "const selesai = Date.now();",
+                  "pm.collectionVariables.set(\"timerStartedAt\", new Date(selesai - 2 * 60 * 60 * 1000).toISOString());",
+                  "pm.collectionVariables.set(\"timerEndedAt\", new Date(selesai).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"durasi jadi tepat 2 jam\", () => {",
+                  "    pm.expect(hasil.duration_seconds).to.eql(7200);",
+                  "});",
+                  "pm.test(\"note ikut terkoreksi\", () => {",
+                  "    pm.expect(hasil.note).to.eql(\"dikoreksi: lupa start timer\");",
+                  "});",
+                  "pm.test(\"tetap berstatus selesai\", () => pm.expect(hasil.is_running).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Koreksi — rentang terbalik ditolak (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/{{timeEntryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "{{timeEntryId}}"
+              ]
+            },
+            "description": "`ended_at` di belakang `started_at` berarti durasi negatif. Ditolak di dua tempat:\nentity memeriksanya sebelum menyentuh database, dan CHECK constraint\n`time_entries_interval_check` menolaknya kalau ada jalur yang luput.\n\nJalankan \"Koreksi catatan waktu\" lebih dulu supaya kedua variabel waktunya terisi.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"started_at\": \"{{timerEndedAt}}\",\n  \"ended_at\": \"{{timerStartedAt}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test(\"pesannya menyebut rentang waktu\", () => {",
+                  "    pm.expect(body.message).to.eql(\"rentang waktu tidak valid\");",
+                  "});",
+                  "pm.test(\"menunjuk field ended_at\", () => {",
+                  "    pm.expect(body.errors).to.have.property(\"ended_at\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hapus catatan waktu",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/{{timeEntryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "{{timeEntryId}}"
+              ]
+            },
+            "description": "Soft delete: barisnya tetap ada di tabel dengan `deleted_at` terisi, tapi tidak lagi muncul di list maupun detail."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"response sukses\", () => pm.expect(pm.response.json().success).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detail setelah dihapus (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/{{timeEntryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "{{timeEntryId}}"
+              ]
+            },
+            "description": "Membuktikan soft delete benar-benar menyembunyikan baris: id yang sama sekarang dijawab 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"pesannya menyebut catatan waktu\", () => {",
+                  "    pm.expect(pm.response.json().message).to.include(\"catatan waktu\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bersihkan task bantuan",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tasks/{{timerTaskId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks",
+                "{{timerTaskId}}"
+              ]
+            },
+            "description": "Menghapus task yang dibuat di awal folder, supaya menjalankan folder ini berulang kali tidak menumpuk sampah data."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"response sukses\", () => pm.expect(pm.response.json().success).to.be.true);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "description": "Pengelolaan user — butuh token DAN role admin (Auth + RequireAdmin). Jalankan \"Login — ambil token (admin)\" lebih dulu.\n\nBedanya dengan /auth/register: di sini `status` wajib dikirim dan `role` boleh ditentukan sendiri.",
+      "item": [
+        {
+          "name": "Create user (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{managedEmail}}\",\n  \"password\": \"rahasia123\",\n  \"name\": \"Siti Aminah\",\n  \"address\": \"Jl. Diponegoro 5, Surabaya\",\n  \"job\": \"QA Engineer\",\n  \"status\": \"aktif\",\n  \"role\": \"user\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`status` wajib dikirim. `role` opsional — kosong berarti `user`, dan hanya menerima `user` atau `admin`.\n\nMenyimpan `userId` untuk request Detail/Update/Delete di bawah."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"managedEmail\", \"siti+\" + Date.now() + \"@contoh.com\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"email sesuai yang dikirim\", () => {",
+                  "    pm.expect(hasil.email).to.eql(pm.collectionVariables.get(\"managedEmail\"));",
+                  "});",
+                  "pm.test(\"password tidak ikut terkirim\", () => pm.expect(hasil).to.not.have.property(\"password\"));",
+                  "pm.collectionVariables.set(\"userId\", hasil.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Paginasi: `page` mulai dari 1, `limit` default 10 dan maksimum 100."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "// Jangan pakai nama variabel `data`: sandbox Postman sudah punya global",
+                  "// bernama itu, dan deklarasi ulang membatalkan seluruh script ini.",
+                  "const hasil = pm.response.json();",
+                  "pm.test(\"data berupa array\", () => pm.expect(hasil.data).to.be.an(\"array\"));",
+                  "pm.test(\"ada metadata paginasi\", () => pm.expect(hasil.meta).to.be.an(\"object\"));",
+                  "pm.test(\"tidak ada password yang bocor\", () => {",
+                  "    hasil.data.forEach((u) => pm.expect(u).to.not.have.property(\"password\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List users — pencarian",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?search=siti&page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "siti"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Pencarian berdasarkan kata kunci."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"data berupa array\", () => pm.expect(pm.response.json().data).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get user by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Memakai `userId` yang disimpan request Create user."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"id sesuai\", () => {",
+                  "    pm.expect(String(pm.response.json().data.id)).to.eql(String(pm.collectionVariables.get(\"userId\")));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update user — sebagian field",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Siti Aminah Rahmawati\",\n  \"job\": \"Senior QA Engineer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Field yang tidak dikirim tetap memakai nilai lama — termasuk password, jadi tidak perlu dikirim ulang setiap update."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const hasil = pm.response.json().data;",
+                  "pm.test(\"name ikut berubah\", () => pm.expect(hasil.name).to.eql(\"Siti Aminah Rahmawati\"));",
+                  "pm.test(\"email tidak berubah walau tidak dikirim\", () => {",
+                  "    pm.expect(hasil.email).to.eql(pm.collectionVariables.get(\"managedEmail\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update user — promosi jadi admin",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Satu-satunya jalur lewat API untuk mengubah role. Nilai di luar `user`/`admin` ditolak 400 sejak validasi, sebelum menyentuh CHECK constraint di database."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"role jadi admin\", () => pm.expect(pm.response.json().data.role).to.eql(\"admin\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete user",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Menghapus user yang dibuat request Create user di atas."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"success true\", () => pm.expect(pm.response.json().success).to.be.true);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Contoh error",
+      "description": "Response gagal yang disengaja, untuk memastikan bentuk error konsisten di seluruh API: `success: false`, `message`, dan `errors` per field untuk kasus validasi.",
+      "item": [
+        {
+          "name": "400 — password kurang dari 8 karakter (register)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"pendek@contoh.com\",\n  \"password\": \"123\",\n  \"name\": \"Pendek\",\n  \"address\": \"Jl. Pendek 1\",\n  \"job\": \"Tester\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Batas minimum 8 karakter dari validator. Batas atas 72 berasal dari bcrypt, yang mengabaikan byte ke-73 dan seterusnya secara diam-diam.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"menyebut field password\", () => {",
+                  "    pm.expect(Object.keys(pm.response.json().errors || {})).to.include(\"password\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 — email sudah terdaftar (register)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{registeredEmail}}\",\n  \"password\": \"rahasia123\",\n  \"name\": \"Budi Kedua\",\n  \"address\": \"Jl. Merdeka 10, Bandung\",\n  \"job\": \"Backend Developer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Memakai email yang sama dengan request Register di folder Auth. Jalankan Register lebih dulu supaya `registeredEmail` terisi.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"success false\", () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 — password salah (login)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{authEmail}}\",\n  \"password\": \"passwordSalahSekali\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Email yang tidak terdaftar dan password yang salah dibalas 401 dengan pesan yang sama persis, supaya tidak bisa dipakai menebak email mana yang terdaftar.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"pesannya generik, tidak menunjuk field mana yang salah\", () => {",
+                  "    // Pesan ini sama persis dengan kasus email tidak terdaftar, sehingga",
+                  "    // tidak bisa dipakai menebak email mana yang sudah terdaftar.",
+                  "    pm.expect(pm.response.json().message).to.eql(\"email atau password salah\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 — tanpa token di /users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "description": "Request ini di-set No Auth, jadi tidak mewarisi `{{token}}` dari koleksi.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"pesannya menyebut token\", () => {",
+                  "    pm.expect(pm.response.json().message.toLowerCase()).to.include(\"token\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 — token ngawur",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer token.ngawur.bukan-jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "description": "Alasan detail (kedaluwarsa / tanda tangan salah / rusak) sengaja tidak dibedakan di response.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 — skema Authorization salah",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "description": "Hanya skema `Bearer` yang diterima — perbandingannya tidak membedakan huruf besar/kecil, sesuai RFC 7235.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"memberi tahu format yang benar\", () => {",
+                  "    pm.expect(pm.response.json().message).to.include(\"Bearer\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 — token user biasa akses /users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "description": "403, bukan 401: identitasnya sudah diketahui dan tokennya sah, hanya haknya yang kurang — login ulang tidak akan menolong.\n\nJalankan \"Register\" atau \"Login — akun hasil register\" lebih dulu supaya `userToken` terisi.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"pesannya menyebut admin\", () => {",
+                  "    pm.expect(pm.response.json().message.toLowerCase()).to.include(\"admin\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 — role di luar user/admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"rolesalah@contoh.com\",\n  \"password\": \"rahasia123\",\n  \"name\": \"Role Salah\",\n  \"address\": \"Jl. Tidak Ada 0\",\n  \"job\": \"Tester\",\n  \"status\": \"aktif\",\n  \"role\": \"superadmin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Nilai role asing ditolak sejak di pintu masuk oleh validasi `oneof`, bukan baru ketahuan di CHECK constraint database. Butuh token admin."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"menyebut field role\", () => {",
+                  "    pm.expect(Object.keys(pm.response.json().errors || {})).to.include(\"role\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "429 — rate limit /auth (klik Send berulang)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{authEmail}}\",\n  \"password\": \"passwordSalahSekali\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Grup /auth dibatasi default 10 request per menit per IP (AUTH_RATE_LIMIT_MAX / AUTH_RATE_LIMIT_WINDOW). Klik Send lebih dari 10 kali dalam satu menit untuk melihat 429.\n\nRequest yang berhasil pun tetap dihitung, supaya penyerang tidak bisa mengulur batas dengan menyelingi login yang benar. Hitungannya disimpan di memori proses, jadi hilang saat aplikasi restart.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Sebelum batas tercapai request ini wajar membalas 401; setelahnya 429.",
+                  "pm.test(\"status 401 atau 429\", () => pm.expect(pm.response.code).to.be.oneOf([401, 429]));",
+                  "if (pm.response.code === 429) {",
+                  "    pm.test(\"bentuk response error konsisten dengan endpoint lain\", () => {",
+                  "        pm.expect(pm.response.json().success).to.be.false;",
+                  "    });",
+                  "} else {",
+                  "    console.log(\"Belum kena rate limit — klik Send lagi.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "409 — no_task duplikat",
           "request": {
@@ -833,8 +2694,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks"
+              ]
             },
             "description": "Jalankan \"Create task (tanpa file) — JSON\" lebih dulu supaya TASK-001 sudah ada."
           },
@@ -873,8 +2740,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks"
+              ]
             },
             "description": "Minimal 3 karakter. Pesan error dikembalikan per field di dalam `errors`."
           },
@@ -917,8 +2790,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks"
+              ]
             },
             "description": "Daftar ekstensi yang diizinkan diatur lewat ALLOWED_EXT di .env, dan ikut dikembalikan di pesan error."
           },
@@ -945,8 +2824,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks/999999",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks", "999999"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks",
+                "999999"
+              ]
             }
           },
           "event": [
@@ -969,8 +2855,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/tasks/abc",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "tasks", "abc"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tasks",
+                "abc"
+              ]
             },
             "description": "Divalidasi di handler sebelum menyentuh usecase maupun database."
           },
@@ -1011,8 +2904,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals"
+              ]
             },
             "description": "Divalidasi oleh tag `validate` di DTO sebelum menyentuh usecase."
           },
@@ -1053,8 +2952,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals"
+              ]
             },
             "description": "category, priority, dan status wajib diisi. Response memuat ketiga pesan error sekaligus, bukan satu per satu."
           },
@@ -1084,8 +2989,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/goals/999999",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "goals", "999999"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "goals",
+                "999999"
+              ]
             }
           },
           "event": [
@@ -1100,8 +3012,185 @@
             }
           ],
           "response": []
+        },
+        {
+          "name": "401 — tanpa token di /time-entries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries"
+              ]
+            },
+            "description": "Request ini di-set No Auth, jadi tidak mewarisi `{{token}}` dari koleksi.\n\nBerbeda dari /tasks dan /goals yang saat ini terbuka, grup ini memang tidak bisa\nterbuka: tanpa identitas pemanggil, tidak ada cara menentukan catatan waktu siapa\nyang harus dikembalikan.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"pesannya menyebut token\", () => {",
+                  "    pm.expect(pm.response.json().message.toLowerCase()).to.include(\"token\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 — format waktu bukan RFC3339",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries?from=besok",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "besok",
+                  "description": "Sengaja salah."
+                }
+              ]
+            },
+            "description": "Query `from`/`to` wajib RFC3339. Format yang salah ditolak di handler, sebelum query dikirim ke database."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test(\"pesannya menyebut format waktu\", () => {",
+                  "    pm.expect(body.message).to.eql(\"format waktu tidak valid\");",
+                  "});",
+                  "pm.test(\"menunjuk field yang salah\", () => {",
+                  "    pm.expect(body.errors).to.have.property(\"from\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 — id catatan waktu bukan angka",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/abc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "abc"
+              ]
+            },
+            "description": "400, bukan 404: \"abc\" bukan id yang tidak ditemukan, melainkan bukan id sama sekali."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"menunjuk field id\", () => {",
+                  "    pm.expect(pm.response.json().errors).to.have.property(\"id\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 — task tidak ditemukan (mulai timer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/time-entries/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "time-entries",
+                "start"
+              ]
+            },
+            "description": "Start memeriksa keberadaan task lebih dulu, jadi `task_id` ngawur dijawab 404 yang\njelas — bukan 500 dari pelanggaran foreign key di database.\n\nPemeriksaan task dilakukan SEBELUM pemeriksaan timer berjalan, jadi request ini tetap\ndijawab 404 meski ada timer yang sedang berjalan.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": 999999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"pesannya menyebut task\", () => {",
+                  "    pm.expect(pm.response.json().message).to.include(\"task dengan id 999999\");",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  }
 }

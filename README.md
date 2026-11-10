@@ -1,7 +1,7 @@
 # Daily Task API — Go Fiber + Clean Architecture
 
 Mini project REST API untuk mencatat daily task: **no task, judul, description, file lampiran**,
-plus resource `goals` dan `users`.
+plus resource `goals`, `users`, dan **time tracking** (pencatatan waktu pengerjaan task).
 Stack: **Go Fiber + database/sql (driver pgx) + PostgreSQL** — tanpa ORM, seluruh query ditulis manual.
 Dipakai sebagai bahan latihan Clean Architecture di Go.
 
@@ -661,9 +661,11 @@ dalam ke paling luar.** Kalau baru membaca codebase ini pertama kali, baca denga
 | [entity/task.go](internal/domain/entity/task.go) | struct `Task` murni + `ErrTaskNotFound`. Tidak ada tag `db`/`json`. |
 | [entity/goals.go](internal/domain/entity/goals.go) | struct `Goals` + `ErrGoalsNotFound`. |
 | [entity/user.go](internal/domain/entity/user.go) | struct `User` + `ErrUserNotFound`. |
+| [entity/time_entry.go](internal/domain/entity/time_entry.go) | struct `TimeEntry` + 4 sentinel error. **Satu-satunya entity di project ini yang punya perilaku**, bukan cuma data: `IsRunning()`, `Stop()`, `Validate()`, `DurationAt()`, `Overlaps()`. Aturan "ended_at harus setelah started_at" hidup di sini, jadi ia berlaku di jalur mana pun — tidak bisa dilewati dengan memanggil repository langsung. |
 | [repository/task_repository.go](internal/domain/repository/task_repository.go) | **port** akses data task: interface `TaskRepository` + `TaskFilter` (search/page/limit + `Offset()`). |
 | [repository/goals_repository.go](internal/domain/repository/goals_repository.go) | port akses data goals. |
 | [repository/user_repository.go](internal/domain/repository/user_repository.go) | port akses data user. |
+| [repository/time_entry_repository.go](internal/domain/repository/time_entry_repository.go) | port akses data catatan waktu. `TimeEntryFilter` punya `UserID` **wajib** (bukan opsional seperti `search`) — bentuk filternya sendiri yang memastikan tidak ada query yang lupa menyaring per pemilik. Plus `FindRunningByUserID` untuk timer yang sedang berjalan. |
 | [storage/file_storage.go](internal/domain/storage/file_storage.go) | **port** penyimpanan file: `Save` / `Open` / `Delete`. Sengaja memakai `io.Reader`, bukan `*multipart.FileHeader`, supaya usecase tidak terikat HTTP. |
 | [security/password_hasher.go](internal/domain/security/password_hasher.go) | **port** hashing password (`Hash` + `Verify`). Dibuat interface supaya algoritmanya bisa diganti (bcrypt → argon2id) tanpa menyentuh usecase, dan supaya unit test bisa memakai hasher cepat. |
 | [security/token_issuer.go](internal/domain/security/token_issuer.go) | **port** token akses: `Claims`, `Token`, `Issue`, `Parse`. Menukar JWT dengan session opaque cukup mengganti adapternya. |
@@ -677,10 +679,12 @@ Semua file di folder ini hanya mengimpor stdlib. Itu yang dijaga oleh perintah `
 | [task_usecase.go](internal/usecase/task_usecase.go) | alur task: generate `no_task` (`TASK-YYYYMMDD-XXXX`), urutan simpan file ↔ insert DB, partial update, hapus lampiran saat delete. Juga rumah dari helper paging (`normalizePaging`, `defaultPage`, `defaultLimit`, `maxLimit`) yang dipakai seluruh paket. |
 | [goals_usecase.go](internal/usecase/goals_usecase.go) | alur goals; contoh pola partial update pakai tabel field + pointer. |
 | [user_usecase.go](internal/usecase/user_usecase.go) | alur user; pola yang sama, tanpa file lampiran. |
+| [time_entry_usecase.go](internal/usecase/time_entry_usecase.go) | alur time tracking: `Start` / `Stop` / `Running` / `List` / `GetByID` / `Update` / `Delete`. Satu-satunya usecase yang bergantung pada **dua** repository — `TimeEntryRepository` dan `TaskRepository`, supaya `task_id` ngawur dijawab 404 dan bukan 500 dari pelanggaran foreign key. Ketidakcocokan pemilik diterjemahkan jadi `NotFound`, bukan `Forbidden`. |
 | [auth_usecase.go](internal/usecase/auth_usecase.go) | register & login. Register memakai ulang `UserUsecase.Create` (tidak menulis ulang hashing/cek email unik); login menyamakan respons & waktu eksekusi antara "email tidak ada" dan "password salah". |
 | [task_usecase_test.go](internal/usecase/task_usecase_test.go) | unit test dengan fake repository **dan** fake storage. |
 | [goals_usecase_test.go](internal/usecase/goals_usecase_test.go) | unit test + `fakeGoalsRepo` dan helper `kindOf` yang dipakai test lain. |
 | [user_usecase_test.go](internal/usecase/user_usecase_test.go) | unit test user. |
+| [time_entry_usecase_test.go](internal/usecase/time_entry_usecase_test.go) | 27 unit test. `fakeTimeEntryRepo` sengaja **meniru aturan database** (partial unique index + CHECK constraint), bukan cuma menyimpan di map — kalau tidak, test akan lulus untuk kode yang gagal di Postgres. Helper `mulaiTimerSatuJamLalu` memundurkan `started_at` karena jam Windows hanya maju ~0,5 ms, sehingga Start→Stop dalam satu test bisa menghasilkan durasi nol. |
 
 Di layer inilah error repository diterjemahkan menjadi `apperror` ber-`Kind`. Usecase tidak pernah
 menyebut status code.
@@ -694,6 +698,7 @@ menyebut status code.
 | [persistence/task_repository_sql.go](internal/infrastructure/persistence/task_repository_sql.go) | implementasi `TaskRepository`. **Satu-satunya** yang tahu nama kolom tasks. Rumah dari helper `rowScanner` dan konstanta `notDeleted`. |
 | [persistence/goals_repository_sql.go](internal/infrastructure/persistence/goals_repository_sql.go) | implementasi `GoalsRepository` — cetakan paling bersih untuk resource baru tanpa file. |
 | [persistence/user_repository_sql.go](internal/infrastructure/persistence/user_repository_sql.go) | implementasi `UserRepository`. |
+| [persistence/time_entry_repository_sql.go](internal/infrastructure/persistence/time_entry_repository_sql.go) | implementasi `TimeEntryRepository`. Satu-satunya repository yang **membaca kode error Postgres**: `terjemahkanErrorTimeEntry` memakai `errors.As` untuk mengambil `*pgconn.PgError`, lalu memetakan `23505` (unique) dan `23514` (check) ke sentinel error entity berdasarkan `ConstraintName`. Tanpa ini, pelanggaran constraint akan keluar sebagai 500. |
 | [storage/local_storage.go](internal/infrastructure/storage/local_storage.go) | implementasi `FileStorage` ke disk: acak nama file, validasi ukuran & ekstensi, cegah path traversal di `resolve`. |
 | [security/bcrypt_hasher.go](internal/infrastructure/security/bcrypt_hasher.go) | implementasi `PasswordHasher` memakai bcrypt, lengkap dengan penjagaan batas 72 byte. |
 | [security/jwt_issuer.go](internal/infrastructure/security/jwt_issuer.go) | implementasi `TokenIssuer` memakai JWT HS256. Algoritma dikunci saat Parse untuk mencegah serangan *alg confusion*, dan token tanpa `exp` ditolak. |
@@ -706,15 +711,17 @@ menyebut status code.
 | [dto/goals_dto.go](internal/delivery/http/dto/goals_dto.go) | DTO goals. |
 | [dto/user_dto.go](internal/delivery/http/dto/user_dto.go) | DTO user. |
 | [dto/auth_dto.go](internal/delivery/http/dto/auth_dto.go) | `RegisterRequest` (tanpa `status` — sengaja), `LoginRequest`, `AuthResponse` (token + `expires_at` + user). |
+| [dto/time_entry_dto.go](internal/delivery/http/dto/time_entry_dto.go) | DTO time tracking. Tidak ada `user_id` di request mana pun — ia selalu dari token. `TimeEntryResponse` menambah tiga field turunan (`is_running`, `duration_seconds`) yang dihitung, bukan disimpan; `newTimeEntryResponseAt` menerima `now` sebagai argumen supaya satu list memakai satu titik waktu yang sama. |
 | [dto/swagger_dto.go](internal/delivery/http/dto/swagger_dto.go) | **khusus dokumentasi** — envelope bertipe konkret (`TaskEnvelope`, `TaskListEnvelope`, `AuthEnvelope`, `ErrorEnvelope`, dst.) yang dirujuk anotasi `@Success`/`@Failure`. Tidak dipakai kode runtime. |
 | [handler/task_handler.go](internal/delivery/http/handler/task_handler.go) | handler fiber untuk task, termasuk `Download` (stream file). Rumah dari helper `parseID`. |
 | [handler/goals_handler.go](internal/delivery/http/handler/goals_handler.go) | handler fiber untuk goals. |
 | [handler/user_handler.go](internal/delivery/http/handler/user_handler.go) | handler fiber untuk user. |
 | [handler/auth_handler.go](internal/delivery/http/handler/auth_handler.go) | handler `register` & `login`. |
+| [handler/time_entry_handler.go](internal/delivery/http/handler/time_entry_handler.go) | 7 handler time tracking. Rumah dari `userIDFromContext` (401 kalau `c.Locals` kosong — gagal ke arah aman kalau middleware-nya lupa dipasang) dan `parseWaktuQuery` (RFC3339; query kosong = tanpa filter, bukan error). `Stop` menerima body kosong, dan `Running` mengirim pointer bertipe supaya `data: null` benar-benar muncul di JSON meski `Data` ber-tag `omitempty`. |
 | [middleware/error_handler.go](internal/delivery/http/middleware/error_handler.go) | **satu-satunya** penerjemah error → HTTP status; juga menangani error bawaan fiber (404 route tidak ada, body terlalu besar). |
 | [middleware/auth.go](internal/delivery/http/middleware/auth.go) | `Auth` memeriksa header `Authorization: Bearer <token>` lalu menaruh `userID`/`userEmail`/`userRole` di `c.Locals` (*siapa pemanggilnya*); `RequireAdmin` menolak non-admin dengan 403 (*dia boleh apa*). `RequireAdmin` wajib dipasang **setelah** `Auth`. |
 | [middleware/rate_limit.go](internal/delivery/http/middleware/rate_limit.go) | pembatas percobaan per IP untuk `/auth/*`, dengan bentuk body 429 yang konsisten dengan response lain. |
-| [route/route.go](internal/delivery/http/route/route.go) | `/health` (sebagai fungsi `healthCheck` agar bisa dianotasi), `/swagger/*` (kalau `EnableDocs`), grup `/api/v1/auth` (tanpa proteksi, tapi ber-rate-limit), grup `/api/v1/users` (`Auth` + `RequireAdmin`), dan struct `Deps`. |
+| [route/route.go](internal/delivery/http/route/route.go) | `/health` (sebagai fungsi `healthCheck` agar bisa dianotasi), `/swagger/*` (kalau `EnableDocs`), grup `/api/v1/auth` (tanpa proteksi, tapi ber-rate-limit), grup `/api/v1/time-entries` (`Auth`), grup `/api/v1/users` (`Auth` + `RequireAdmin`), dan struct `Deps`. Di grup time-entries, `/start`, `/stop`, dan `/running` **wajib** didaftarkan sebelum `/:id` — fiber mencocokkan rute sesuai urutan pendaftaran, jadi kalau terbalik, `"running"` dibaca sebagai nilai `:id` lalu ditolak 400 padahal rutenya ada. |
 
 ### 5. `pkg/` — shared kernel, boleh dipakai layer mana pun
 
@@ -730,7 +737,7 @@ menyebut status code.
 |---|---|
 | [cmd/api/main.go](cmd/api/main.go) | composition root: anotasi umum Swagger (`@title`, `@version`, `@tag.*`) → load config → set `SwaggerInfo.Host` → koneksi DB → migrasi → storage → rakit repo/usecase/handler → middleware fiber (recover, logger, cors) → `route.Register` → graceful shutdown (SIGINT/SIGTERM, timeout 10s). |
 | [config/config.go](config/config.go) | baca `.env` + env var. **Satu-satunya** pemakai `os.Getenv`. Juga `DSN()` (untuk koneksi), `MaskedDSN()` (untuk log, password disembunyikan), dan `App.EnableDocs`. |
-| [migrations/](migrations/) | `0001_create_tasks.sql`, `0002_create_goals.sql`, `0003_create_users.sql`, `0004_add_email_password_to_users.sql`, `0005_add_role_to_users.sql`. |
+| [migrations/](migrations/) | `0001_create_tasks.sql`, `0002_create_goals.sql`, `0003_create_users.sql`, `0004_add_email_password_to_users.sql`, `0005_add_role_to_users.sql`, `0006_create_time_entries.sql`. |
 | [migrations/embed.go](migrations/embed.go) | `//go:embed` semua `.sql` ke dalam binary, jadi deploy tidak perlu menyalin folder migrasi. |
 | [.env.example](.env.example) | daftar lengkap env var beserta nilai defaultnya, termasuk `ENABLE_DOCS`. |
 | [docker-compose.yml](docker-compose.yml) | container PostgreSQL untuk development. |
@@ -815,6 +822,52 @@ Field: `no_task` (opsional — digenerate `TASK-YYYYMMDD-XXXX` kalau kosong, waj
 Field: `title` (wajib, 3–255), `category` / `priority` / `status` (wajib, maks 100),
 `progress` (opsional, maks 100). Pencarian dicocokkan ke `title` dan `category`.
 Goals tidak punya lampiran file, jadi request/response-nya JSON murni.
+
+### Time Tracking
+
+**Seluruh grup ini butuh token** (role apa pun). Berbeda dari `/tasks` dan `/goals` yang saat
+ini masih terbuka, grup ini memang tidak bisa terbuka: `user_id` selalu diambil dari token,
+tidak pernah dari body atau query — "catatan waktu saya" tidak punya arti tanpa "saya".
+
+| Method | Path | Keterangan |
+|---|---|---|
+| POST | `/api/v1/time-entries/start` | mulai timer untuk sebuah task |
+| POST | `/api/v1/time-entries/stop` | hentikan timer yang sedang berjalan (tanpa id) |
+| GET | `/api/v1/time-entries/running` | timer yang sedang berjalan, atau `data: null` |
+| GET | `/api/v1/time-entries?task_id=&from=&to=&page=&limit=` | list milik sendiri + paginasi |
+| GET | `/api/v1/time-entries/:id` | detail |
+| PUT | `/api/v1/time-entries/:id` | koreksi `task_id` / `started_at` / `ended_at` / `note` |
+| DELETE | `/api/v1/time-entries/:id` | hapus catatan waktu (soft delete) |
+
+Field: `task_id` (wajib saat start, harus ada di tabel tasks), `note` (opsional, maks 255).
+Saat koreksi, semua field opsional — yang tidak dikirim dibiarkan apa adanya, dan `user_id`
+tidak bisa diubah.
+
+**Satu user hanya boleh punya satu timer berjalan.** Aturan ini dijaga dua lapis: usecase
+memeriksanya lebih dulu supaya pesan 409-nya enak dibaca, dan partial unique index
+`time_entries_one_running_per_user` menjaganya di database kalau dua request datang bersamaan.
+`ended_at` yang lebih awal dari `started_at` juga ditolak dua lapis — entity sebelum menyentuh
+database, dan CHECK constraint `time_entries_interval_check` sebagai jaring terakhir.
+
+`/stop` sengaja tidak menerima id: yang dihentikan adalah satu-satunya timer berjalan milik
+pemanggil. Body-nya pun opsional — kirim `note` kalau mau menimpa catatan, atau tidak kirim
+body sama sekali.
+
+`/running` membalas `200` dengan `data: null` kalau tidak ada timer yang berjalan, **bukan
+`404`**. Tidak sedang mencatat waktu adalah keadaan normal; membalas 404 akan memaksa client
+memperlakukannya sebagai error.
+
+Catatan waktu milik user lain dibalas `404`, bukan `403`. Membalas 403 berarti mengakui bahwa
+id itu ada — itu membocorkan keberadaan data orang lain.
+
+`from` dan `to` memakai format RFC3339 (contoh `2026-11-10T09:00:00+07:00`) dan disaring pada
+`started_at`: **batas bawah inklusif, batas atas eksklusif.** Jadi rentang satu bulan penuh
+ditulis dari tanggal 1 bulan ini sampai tanggal 1 bulan berikutnya — tanpa perlu menebak apakah
+hari terakhir ikut terhitung.
+
+`duration_seconds` dihitung server, bukan disimpan: untuk timer yang masih berjalan ia dihitung
+sampai sekarang, dan untuk yang sudah berhenti dari `started_at` ke `ended_at`. Menyimpannya
+sebagai kolom berarti menyimpan angka yang bisa bertentangan dengan dua kolom di sebelahnya.
 
 ### Users
 
@@ -912,6 +965,36 @@ curl -X DELETE http://localhost:3000/api/v1/goals/1
 ```
 
 ```bash
+# time tracking — semuanya butuh token; $TOKEN diambil dari contoh login di bawah
+
+# mulai timer untuk task 1
+curl -X POST http://localhost:3000/api/v1/time-entries/start \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"task_id":1,"note":"mulai ngerjain"}'
+
+# lihat timer yang sedang berjalan (200 + data:null kalau tidak ada)
+curl http://localhost:3000/api/v1/time-entries/running \
+  -H "Authorization: Bearer $TOKEN"
+
+# hentikan — tanpa id, dan body pun opsional
+curl -X POST http://localhost:3000/api/v1/time-entries/stop \
+  -H "Authorization: Bearer $TOKEN"
+
+# rekap satu bulan untuk task tertentu: batas bawah inklusif, batas atas eksklusif
+curl -G http://localhost:3000/api/v1/time-entries \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode "task_id=1" \
+  --data-urlencode "from=2026-11-01T00:00:00+07:00" \
+  --data-urlencode "to=2026-12-01T00:00:00+07:00"
+
+# koreksi catatan yang salah (lupa start, atau lupa stop sampai besok pagi)
+curl -X PUT http://localhost:3000/api/v1/time-entries/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"started_at":"2026-11-10T09:00:00+07:00","ended_at":"2026-11-10T11:00:00+07:00","note":"dikoreksi"}'
+```
+
+```bash
 # daftar akun (publik) — langsung dapat token
 curl -X POST http://localhost:3000/api/v1/auth/register \
   -H "Content-Type: application/json" \
@@ -959,13 +1042,62 @@ Untuk koleksi yang sudah disiapkan, import dua file ini lewat **Import** di Post
 
 | File | Isi |
 |---|---|
-| `Daily-Task-API.postman_collection.json` | 27 request: folder Tasks, Goals, dan "Contoh error" |
-| `Daily-Task-API-Local.postman_environment.json` | variable `baseUrl`, `taskId`, `goalsId` |
+| `Daily-Task-API.postman_collection.json` | 65 request (158 assertion): folder Auth, Tasks, Goals, Time Tracking, Users, dan "Contoh error" |
+| `Daily-Task-API-Local.postman_environment.json` | variable `baseUrl`, `authEmail`, `authPassword`, `token`, `userToken`, `registeredEmail`, `managedEmail`, `userId`, `taskId`, `goalsId`, `timeEntryId`, `timerTaskId`, `timerNoTask`, `timerFrom`, `timerTo`, `timerStartedAt`, `timerEndedAt` |
 
 Pilih environment **Daily Task API - Local**, lalu jalankan request dari atas ke bawah.
 Request *Create task (dengan file)* dan *Create goals — JSON* menyimpan `taskId` / `goalsId`
 otomatis lewat test script, jadi request Detail / Update / Download / Delete langsung terpakai
 tanpa menyalin ID manual.
+
+### Autentikasi di koleksi
+
+Koleksi memakai **Bearer Token di level koleksi** dengan nilai `{{token}}`, jadi semua request
+mewarisinya tanpa perlu menempel header `Authorization` satu per satu. Folder *Auth* dan request
+contoh error yang memang harus gagal di-set **No Auth** supaya tidak ikut mewarisi.
+
+| Variable | Diisi oleh | Dipakai |
+|---|---|---|
+| `token` | *Login — ambil token (admin)* | seluruh koleksi, terutama folder Users |
+| `userToken` | *Register* dan *Login — akun hasil register* | contoh error 403 |
+| `authEmail`, `authPassword` | diisi manual | request login admin |
+
+Karena `/auth/register` selalu membuat role `user` dan `/api/v1/users` sendiri sudah butuh token
+admin, admin pertama harus dipromosikan sekali lewat SQL — folder *Users* akan balas 403 sebelum
+ini dikerjakan:
+
+```sql
+UPDATE users SET role = 'admin' WHERE email = 'admin@contoh.com';
+```
+
+Alur yang disarankan: *Register* → promosikan lewat SQL → isi `authEmail`/`authPassword` →
+*Login — ambil token (admin)* → folder *Users* siap dipakai. Request *Register* dan *Create user*
+mengisi sendiri email ber-timestamp lewat pre-request script, jadi keduanya bisa dijalankan
+berulang tanpa kena 409.
+
+### Folder Time Tracking
+
+Folder ini bukan sekadar kumpulan request, tapi satu alur utuh yang dibaca dari atas ke bawah:
+ia membuat task bantuan sendiri, memakainya untuk start → running → stop → list → koreksi →
+hapus, lalu membersihkan task itu di request terakhir. Jadi folder ini bisa di-**Run** sendirian
+dan bisa dijalankan berulang kali tanpa menumpuk sampah data — `no_task` task bantuannya dibuat
+ber-timestamp lewat pre-request script, karena kolom itu unik.
+
+| Variable | Diisi oleh | Kenapa terpisah |
+|---|---|---|
+| `timerTaskId` | *Siapkan task untuk timer* | supaya tidak menimpa `taskId` milik folder Tasks |
+| `timeEntryId` | *Mulai timer* | dipakai Detail / Koreksi / Hapus |
+| `timerFrom`, `timerTo` | pre-request *List — saring per task & rentang waktu* | rentang ±1 hari dari sekarang, supaya request-nya tidak basi |
+| `timerStartedAt`, `timerEndedAt` | pre-request *Koreksi catatan waktu* | rentang tepat 2 jam, supaya `duration_seconds` bisa diuji dengan angka pasti (7200) |
+
+Dua request di folder ini memang **harus** 409, dan keduanya bergantung pada keadaan — jalankan
+berurutan: *Mulai timer lagi* hanya 409 kalau ada timer yang berjalan, dan *Hentikan timer lagi*
+hanya 409 kalau tidak ada. Kalau *Mulai timer* yang pertama langsung dijawab 409, berarti user
+itu masih punya timer yang menggantung dari percobaan sebelumnya: jalankan *Hentikan timer*
+sekali, lalu mulai folder dari atas.
+
+Seluruh grup `/api/v1/time-entries` wajib token — berbeda dari `/tasks` dan `/goals` yang saat
+ini masih terbuka. Token role `user` sudah cukup; folder ini tidak butuh admin.
 
 Khusus request yang mengirim file, buka tab **Body → form-data**, lalu klik **Select Files**
 di baris `file` untuk memilih file dari komputer Anda. Postman tidak bisa menyimpan path file
@@ -973,8 +1105,23 @@ di dalam koleksi, jadi bagian ini memang harus diisi sendiri.
 
 Setiap request sudah punya test script, jadi **Run collection** akan langsung menunjukkan
 request mana yang gagal. Folder "Contoh error" sengaja berisi request yang harus gagal:
-409 no_task duplikat, 400 validasi judul, 400 ekstensi file, 404 task tidak ada, 400 id bukan angka,
-400 title goals terlalu pendek, 400 field goals wajib tidak dikirim, 404 goals tidak ada.
+
+- **auth & role** — 400 password kurang dari 8 karakter, 409 email sudah terdaftar,
+  401 password salah, 401 tanpa token, 401 token ngawur, 401 skema `Authorization` salah,
+  403 token user biasa akses `/users`, 400 role di luar `user`/`admin`
+- **tasks & goals** — 409 no_task duplikat, 400 validasi judul, 400 ekstensi file,
+  404 task tidak ada, 400 id bukan angka, 400 title goals terlalu pendek,
+  400 field goals wajib tidak dikirim, 404 goals tidak ada
+- **time tracking** — 401 tanpa token di `/time-entries`, 400 `from` bukan RFC3339,
+  400 id catatan waktu bukan angka, 404 task tidak ada saat mulai timer
+
+Dua error time tracking yang bergantung keadaan (409 timer ganda dan 409 stop saat tidak ada
+timer) tidak ditaruh di sini, melainkan di dalam folder *Time Tracking* — di sanalah keadaan
+yang dibutuhkannya terbentuk oleh request sebelumnya.
+
+Satu request dikecualikan dari **Run collection**: *429 — rate limit /auth*. Batasnya default
+10 request per menit per IP, jadi 429 baru muncul kalau **Send** diklik berulang kali — test-nya
+menerima 401 maupun 429.
 
 > Jangan menulis `const data = ...` di tab **Scripts**. Sandbox Postman sudah punya variabel global
 > bernama `data`, dan deklarasi itu melempar `SyntaxError: Identifier 'data' has already been

@@ -207,6 +207,34 @@ definitions:
     - name
     - password
     type: object
+  dto.RunningTimeEntryEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/dto.TimeEntryResponse'
+      message:
+        example: tidak ada timer yang sedang berjalan
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.StartTimerRequest:
+    properties:
+      note:
+        maxLength: 255
+        type: string
+      task_id:
+        minimum: 1
+        type: integer
+    required:
+    - task_id
+    type: object
+  dto.StopTimerRequest:
+    properties:
+      note:
+        maxLength: 255
+        type: string
+    type: object
   dto.TaskEnvelope:
     properties:
       data:
@@ -252,6 +280,55 @@ definitions:
       updated_at:
         type: string
     type: object
+  dto.TimeEntryEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/dto.TimeEntryResponse'
+      message:
+        example: timer berhasil dimulai
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.TimeEntryListEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/dto.TimeEntryResponse'
+        type: array
+      message:
+        example: daftar catatan waktu berhasil diambil
+        type: string
+      meta:
+        $ref: '#/definitions/response.Meta'
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.TimeEntryResponse:
+    properties:
+      created_at:
+        type: string
+      duration_seconds:
+        type: integer
+      ended_at:
+        type: string
+      id:
+        type: integer
+      is_running:
+        type: boolean
+      note:
+        type: string
+      started_at:
+        type: string
+      task_id:
+        type: integer
+      updated_at:
+        type: string
+      user_id:
+        type: integer
+    type: object
   dto.UpdateGoalsRequest:
     properties:
       category:
@@ -270,6 +347,19 @@ definitions:
         maxLength: 255
         minLength: 3
         type: string
+    type: object
+  dto.UpdateTimeEntryRequest:
+    properties:
+      ended_at:
+        type: string
+      note:
+        maxLength: 255
+        type: string
+      started_at:
+        type: string
+      task_id:
+        minimum: 1
+        type: integer
     type: object
   dto.UpdateUserRequest:
     properties:
@@ -875,6 +965,314 @@ paths:
       summary: Unduh lampiran task
       tags:
       - Tasks
+  /api/v1/time-entries:
+    get:
+      description: |-
+        Hanya catatan waktu milik pemanggil yang dikembalikan — `user_id` diambil dari
+        token, bukan dari query string.
+        `from` dan `to` memakai format RFC3339, contoh `2026-11-01T00:00:00+07:00`.
+        Keduanya disaring pada `started_at`, dengan batas bawah inklusif dan batas atas
+        eksklusif — jadi rentang satu bulan penuh ditulis dari tanggal 1 bulan ini
+        sampai tanggal 1 bulan berikutnya.
+      parameters:
+      - description: Saring per task
+        in: query
+        minimum: 1
+        name: task_id
+        type: integer
+      - description: Mulai dari (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: Sampai sebelum (RFC3339)
+        in: query
+        name: to
+        type: string
+      - default: 1
+        description: Halaman, mulai dari 1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 10
+        description: Jumlah data per halaman
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.TimeEntryListEnvelope'
+        "400":
+          description: format waktu atau rentang tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      summary: Daftar catatan waktu
+      tags:
+      - Time Tracking
+  /api/v1/time-entries/{id}:
+    delete:
+      description: |-
+        Soft delete: baris hanya diberi `deleted_at`. Menghapus timer yang sedang
+        berjalan membebaskan user untuk memulai timer baru.
+      parameters:
+      - description: ID catatan waktu
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.MessageEnvelope'
+        "400":
+          description: id bukan angka positif
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: catatan waktu tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      summary: Hapus catatan waktu
+      tags:
+      - Time Tracking
+    get:
+      description: |-
+        Catatan waktu milik user lain dibalas 404, bukan 403 — 403 akan memberi tahu
+        bahwa id itu ada, cukup untuk memetakan catatan waktu siapa saja dengan
+        mencoba angka satu per satu.
+      parameters:
+      - description: ID catatan waktu
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.TimeEntryEnvelope'
+        "400":
+          description: id bukan angka positif
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: catatan waktu tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      summary: Detail catatan waktu
+      tags:
+      - Time Tracking
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Update sebagian field. Dipakai terutama untuk membetulkan durasi saat lupa
+        menekan Stop: kirim `ended_at` dengan waktu yang semestinya.
+        Field yang tidak dikirim tetap memakai nilai lama. Mengirim `ended_at` pada
+        entry yang masih berjalan berarti menutupnya; sebaliknya entry yang sudah
+        ditutup tidak bisa dijalankan kembali lewat endpoint ini.
+      parameters:
+      - description: ID catatan waktu
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      - description: Field yang mau diubah saja
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateTimeEntryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.TimeEntryEnvelope'
+        "400":
+          description: validasi gagal, id tidak valid, atau rentang waktu terbalik
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: catatan waktu atau task tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      summary: Koreksi catatan waktu
+      tags:
+      - Time Tracking
+  /api/v1/time-entries/running:
+    get:
+      description: |-
+        Dipakai saat halaman dimuat, supaya timer yang sedang berjalan tidak hilang
+        setelah browser di-refresh.
+        Tidak ada timer yang berjalan BUKAN error: dibalas 200 dengan `data` null,
+        karena itu keadaan normal yang akan sering terjadi.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.RunningTimeEntryEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      summary: Timer yang sedang berjalan
+      tags:
+      - Time Tracking
+  /api/v1/time-entries/start:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Memulai pencatatan waktu untuk sebuah task. Waktu mulai diambil dari jam server
+        dan pemiliknya dari token — keduanya tidak bisa dikirim dari request.
+        Hanya boleh ada satu timer berjalan per user. Kalau masih ada yang berjalan,
+        request ini dibalas 409 dan timer lama TIDAK ikut dihentikan.
+      parameters:
+      - description: Task yang dikerjakan
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.StartTimerRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dto.TimeEntryEnvelope'
+        "400":
+          description: validasi gagal
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "404":
+          description: task tidak ditemukan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "409":
+          description: masih ada timer yang berjalan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      summary: Mulai timer
+      tags:
+      - Time Tracking
+  /api/v1/time-entries/stop:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Menutup timer milik pemanggil. Tidak perlu mengirim id entry: hanya ada satu
+        timer yang mungkin berjalan per user, jadi tidak ada yang ambigu — sekaligus
+        berarti timer milik orang lain tidak bisa dihentikan lewat endpoint ini.
+        `note` opsional: kalau tidak dikirim, catatan dari saat Start dipertahankan.
+      parameters:
+      - description: Catatan penutup (opsional)
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.StopTimerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.TimeEntryEnvelope'
+        "400":
+          description: validasi gagal
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "401":
+          description: token tidak dikirim atau tidak valid
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "409":
+          description: tidak ada timer yang sedang berjalan
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.ErrorEnvelope'
+      security:
+      - BearerAuth: []
+      summary: Hentikan timer
+      tags:
+      - Time Tracking
   /api/v1/users:
     get:
       description: '`search` dicocokkan ke `name` dan `job` (case-insensitive, pakai

@@ -54,6 +54,8 @@ import (
 // @tag.description	Daily task, satu-satunya resource yang punya lampiran file
 // @tag.name			Goals
 // @tag.description	Target/goals, JSON murni
+// @tag.name			Time Tracking
+// @tag.description	Pencatatan waktu pengerjaan task — satu timer berjalan per user
 // @tag.name			Users
 // @tag.description	Data user
 func main() {
@@ -108,6 +110,13 @@ func main() {
 	goalsUsecase := usecase.NewGoalsUsecase(goalsRepo)
 	goalsHandler := handler.NewGoalsHandler(goalsUsecase, validate)
 
+	// Time tracking ikut memakai taskRepo: Start memastikan task-nya ada
+	// sebelum timer dimulai, supaya task_id ngawur dijawab 404 dan bukan
+	// 500 dari pelanggaran foreign key.
+	timeEntryRepo := persistence.NewTimeEntryRepository(db)
+	timeEntryUsecase := usecase.NewTimeEntryUsecase(timeEntryRepo, taskRepo)
+	timeEntryHandler := handler.NewTimeEntryHandler(timeEntryUsecase, validate)
+
 	// cost 0 = pakai bcrypt.DefaultCost.
 	passwordHasher := infrasecurity.NewBcryptHasher(0)
 	tokenIssuer := infrasecurity.NewJWTIssuer(cfg.Auth.JWTSecret, cfg.Auth.JWTTTL)
@@ -133,11 +142,12 @@ func main() {
 	app.Use(cors.New())
 
 	route.Register(app, route.Deps{
-		TaskHandler:    taskHandler,
-		GoalsHandler:   goalsHandler,
-		UserHandler:    userHandler,
-		AuthHandler:    authHandler,
-		AuthMiddleware: middleware.Auth(tokenIssuer),
+		TaskHandler:      taskHandler,
+		GoalsHandler:     goalsHandler,
+		UserHandler:      userHandler,
+		AuthHandler:      authHandler,
+		TimeEntryHandler: timeEntryHandler,
+		AuthMiddleware:   middleware.Auth(tokenIssuer),
 		// Dipasang setelah AuthMiddleware di route.go — ia membaca role
 		// yang ditaruh AuthMiddleware di c.Locals.
 		AdminMiddleware: middleware.RequireAdmin(),

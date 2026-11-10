@@ -729,6 +729,440 @@
                 }
             }
         },
+        "/api/v1/time-entries": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Hanya catatan waktu milik pemanggil yang dikembalikan — `user_id` diambil dari\ntoken, bukan dari query string.\n`from` dan `to` memakai format RFC3339, contoh `2026-11-01T00:00:00+07:00`.\nKeduanya disaring pada `started_at`, dengan batas bawah inklusif dan batas atas\neksklusif — jadi rentang satu bulan penuh ditulis dari tanggal 1 bulan ini\nsampai tanggal 1 bulan berikutnya.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Time Tracking"
+                ],
+                "summary": "Daftar catatan waktu",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Saring per task",
+                        "name": "task_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Mulai dari (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sampai sebelum (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Halaman, mulai dari 1",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Jumlah data per halaman",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.TimeEntryListEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "format waktu atau rentang tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/time-entries/running": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Dipakai saat halaman dimuat, supaya timer yang sedang berjalan tidak hilang\nsetelah browser di-refresh.\nTidak ada timer yang berjalan BUKAN error: dibalas 200 dengan `data` null,\nkarena itu keadaan normal yang akan sering terjadi.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Time Tracking"
+                ],
+                "summary": "Timer yang sedang berjalan",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.RunningTimeEntryEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/time-entries/start": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Memulai pencatatan waktu untuk sebuah task. Waktu mulai diambil dari jam server\ndan pemiliknya dari token — keduanya tidak bisa dikirim dari request.\nHanya boleh ada satu timer berjalan per user. Kalau masih ada yang berjalan,\nrequest ini dibalas 409 dan timer lama TIDAK ikut dihentikan.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Time Tracking"
+                ],
+                "summary": "Mulai timer",
+                "parameters": [
+                    {
+                        "description": "Task yang dikerjakan",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.StartTimerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dto.TimeEntryEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "validasi gagal",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "task tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "409": {
+                        "description": "masih ada timer yang berjalan",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/time-entries/stop": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Menutup timer milik pemanggil. Tidak perlu mengirim id entry: hanya ada satu\ntimer yang mungkin berjalan per user, jadi tidak ada yang ambigu — sekaligus\nberarti timer milik orang lain tidak bisa dihentikan lewat endpoint ini.\n`note` opsional: kalau tidak dikirim, catatan dari saat Start dipertahankan.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Time Tracking"
+                ],
+                "summary": "Hentikan timer",
+                "parameters": [
+                    {
+                        "description": "Catatan penutup (opsional)",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.StopTimerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.TimeEntryEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "validasi gagal",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "409": {
+                        "description": "tidak ada timer yang sedang berjalan",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/time-entries/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Catatan waktu milik user lain dibalas 404, bukan 403 — 403 akan memberi tahu\nbahwa id itu ada, cukup untuk memetakan catatan waktu siapa saja dengan\nmencoba angka satu per satu.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Time Tracking"
+                ],
+                "summary": "Detail catatan waktu",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "ID catatan waktu",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.TimeEntryEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "id bukan angka positif",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "catatan waktu tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update sebagian field. Dipakai terutama untuk membetulkan durasi saat lupa\nmenekan Stop: kirim `ended_at` dengan waktu yang semestinya.\nField yang tidak dikirim tetap memakai nilai lama. Mengirim `ended_at` pada\nentry yang masih berjalan berarti menutupnya; sebaliknya entry yang sudah\nditutup tidak bisa dijalankan kembali lewat endpoint ini.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Time Tracking"
+                ],
+                "summary": "Koreksi catatan waktu",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "ID catatan waktu",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Field yang mau diubah saja",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.UpdateTimeEntryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.TimeEntryEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "validasi gagal, id tidak valid, atau rentang waktu terbalik",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "catatan waktu atau task tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Soft delete: baris hanya diberi `deleted_at`. Menghapus timer yang sedang\nberjalan membebaskan user untuk memulai timer baru.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Time Tracking"
+                ],
+                "summary": "Hapus catatan waktu",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "ID catatan waktu",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.MessageEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "id bukan angka positif",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "token tidak dikirim atau tidak valid",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "catatan waktu tidak ditemukan",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorEnvelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users": {
             "get": {
                 "security": [
@@ -1380,6 +1814,47 @@
                 }
             }
         },
+        "dto.RunningTimeEntryEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dto.TimeEntryResponse"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "tidak ada timer yang sedang berjalan"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "dto.StartTimerRequest": {
+            "type": "object",
+            "required": [
+                "task_id"
+            ],
+            "properties": {
+                "note": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "task_id": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "dto.StopTimerRequest": {
+            "type": "object",
+            "properties": {
+                "note": {
+                    "type": "string",
+                    "maxLength": 255
+                }
+            }
+        },
         "dto.TaskEnvelope": {
             "type": "object",
             "properties": {
@@ -1447,6 +1922,79 @@
                 }
             }
         },
+        "dto.TimeEntryEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dto.TimeEntryResponse"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "timer berhasil dimulai"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "dto.TimeEntryListEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.TimeEntryResponse"
+                    }
+                },
+                "message": {
+                    "type": "string",
+                    "example": "daftar catatan waktu berhasil diambil"
+                },
+                "meta": {
+                    "$ref": "#/definitions/response.Meta"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "dto.TimeEntryResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "duration_seconds": {
+                    "type": "integer"
+                },
+                "ended_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_running": {
+                    "type": "boolean"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.UpdateGoalsRequest": {
             "type": "object",
             "properties": {
@@ -1470,6 +2018,25 @@
                     "type": "string",
                     "maxLength": 255,
                     "minLength": 3
+                }
+            }
+        },
+        "dto.UpdateTimeEntryRequest": {
+            "type": "object",
+            "properties": {
+                "ended_at": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "integer",
+                    "minimum": 1
                 }
             }
         },
